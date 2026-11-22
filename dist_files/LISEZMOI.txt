@@ -1,0 +1,43 @@
+﻿Camra's Tool 1.2.0 — DMA Speedtest
+Développé par 1sfk sur Discord
+==================================
+
+INSTALLATION
+------------
+Rien à installer : lancez « Camra's Tool.exe ».
+Tout est déjà dans l'exe (LeechCore, FTD3XX.dll, runtime Visual C++, OpenOCD,
+pilotes FTDI et WCH). Aucun téléchargement n'est nécessaire.
+
+Configuration requise : Windows 10 ou 11, 64 bits.
+
+UTILISATION
+-----------
+1. Branchez la carte DMA en USB 3 sur ce PC (le PC de test). Le PC cible doit être allumé.
+2. Fermez les autres logiciels DMA : une seule application à la fois peut utiliser la carte.
+3. Lancez Camra's Tool : il se connecte tout seul. En cas de problème, l'onglet
+   « Diagnostic » s'ouvre et propose les solutions à tester.
+4. Speedtest → « Lancer le test complet ».
+
+PILOTES
+-------
+Si le pilote FTDI D3XX (indispensable) ou WCH CH341 (pour flasher le firmware) manque,
+le Diagnostic affiche un bouton « Installer le pilote ». Cliquez dessus et acceptez la
+demande administrateur de Windows. Rebranchez ensuite la carte.
+
+PREMIER LANCEMENT
+-----------------
+Windows peut afficher « Windows a protégé votre ordinateur » (SmartScreen), car l'exe
+n'est pas signé numériquement : cliquez sur « Informations complémentaires » puis
+« Exécuter quand même ».
+
+Les réglages et l'historique sont enregistrés à côté de l'exe, ou dans
+%LOCALAPPDATA%\CamrasTool si ce dossier est protégé (ex. Program Files).
+
+
+Camra's Tool 1.2.0 — DMA Speedtest (English)
+============================================
+Nothing to install: run "Camra's Tool.exe" (Windows 10/11, 64-bit). Everything is built in.
+Plug the DMA card into a USB 3 port of this PC, keep the target PC on, close other DMA
+software, then start the app. Switch the language with FR / EN at the top right.
+If a driver is missing, the Diagnostics tab offers an "Install the driver" button.
+If SmartScreen warns you: "More info" → "Run anyway" (the exe is not code-signed).

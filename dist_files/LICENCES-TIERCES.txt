@@ -1,0 +1,45 @@
+﻿Camra's Tool 1.2.0 — composants tiers
+=====================================
+
+Camra's Tool (développé par 1sfk sur Discord) intègre les composants suivants.
+Ils sont extraits au premier lancement dans %LOCALAPPDATA%\CamrasTool.
+
+1. LeechCore 2.16.9.60 (leechcore.dll)
+   Auteur : Ulf Frisk. Licence : GNU GPL v3.
+   Code source : https://github.com/ufrisk/LeechCore
+
+2. OpenOCD 0.11.0+dev, version CH347 (openocd.exe et scripts)
+   Licence : GNU GPL v2.
+   Code source : https://github.com/WCHSoftGroup/ch347
+   (dépôt WCH de CH347FPGADownloader, fork d'OpenOCD)
+
+3. Bitstreams proxy bscan_spi (FPGABit\bscan_spi_*.bit)
+   Projet : https://github.com/quartiq/bscan_spi_bitstreams
+   Ces fichiers sont livrés avec l'outil CH347FPGADownloader de WCH ;
+   leurs conditions sont celles de ce projet.
+
+4. FTD3XX.dll 1.3.0.10 et pilote FTDI D3XX 1.3.0.8 (FTDIBUS3)
+   © Future Technology Devices International Ltd (FTDI).
+   Redistribués avec un produit utilisant une puce FTDI, selon la licence des pilotes FTDI
+   (voir https://ftdichip.com/drivers/d3xx-drivers/).
+
+5. CH347DLL.DLL et pilote WCH CH341/CH347 (CH341WDM 2.4.2023.10)
+   © Nanjing Qinheng Microelectronics (WCH) — https://www.wch-ic.com
+
+6. Dear ImGui 1.93.1 WIP (interface)
+   (c) Omar Cornut. Licence : MIT - https://github.com/ocornut/imgui
+
+7. vcruntime140.dll
+   © Microsoft Corporation — Microsoft Visual C++ Redistributable.
+
+Les pilotes FTDI et WCH sont signés par Microsoft (WHQL). Ils ne sont installés que si
+l'utilisateur clique sur « Installer le pilote » et accepte la demande administrateur.
+
+
+Camra's Tool 1.2.0 — third-party components
+===========================================
+
+Camra's Tool bundles the components listed above (LeechCore GPL-3.0, OpenOCD GPL-2.0,
+bscan_spi bitstreams, FTDI D3XX driver and FTD3XX.dll, WCH CH341/CH347 driver and CH347DLL.DLL,
+Microsoft vcruntime140.dll). Source code of the GPL components is available at the
+addresses given above.

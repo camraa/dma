@@ -1,0 +1,5 @@
+out/
+obj/
+dist/
+*.ini
+CamrasTool_history.txt
