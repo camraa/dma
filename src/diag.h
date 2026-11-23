@@ -23,3 +23,4 @@ void DiagStart();
 void DiagAction(const Fix& f);
 std::string DiagReport();
 std::string DiagDiscord();
+std::string Anon(std::string s);              // retire le nom d'utilisateur des chemins

@@ -112,6 +112,15 @@ std::wstring LocalDir() {
 // Mode portable : réglages et historique à côté de l'exe, sauf si ce dossier est protégé (Program Files)
 std::wstring DataDir() {
     static std::wstring dir;
+    if (dir.empty()) {                       // --data=DOSSIER : tests automatiques
+        std::wstring cmd = GetCommandLineW();
+        size_t k = cmd.find(L"--data=");
+        if (k != std::wstring::npos) {
+            size_t e = cmd.find(L' ', k);
+            dir = cmd.substr(k + 7, e == std::wstring::npos ? e : e - k - 7);
+            MakeDirs(dir);
+        }
+    }
     if (dir.empty()) {
         std::wstring exe = ExeDir();
         std::wstring probe = exe + L"\\.camras_write_test";
@@ -192,6 +201,21 @@ void Log(int lvl, const char* fmt, ...) {
     SYSTEMTIME t;
     GetLocalTime(&t);
     std::lock_guard<std::mutex> l(g_logMx);
+    // Copie sur disque (2 Mo, un fichier précédent gardé)
+    static HANDLE file = INVALID_HANDLE_VALUE;
+    static bool tried = false;
+    if (!tried) {
+        tried = true;
+        std::wstring p = DataDir() + L"\\CamrasTool.log";
+        WIN32_FILE_ATTRIBUTE_DATA fa;
+        if (GetFileAttributesExW(p.c_str(), GetFileExInfoStandard, &fa) && fa.nFileSizeLow > (2u << 20)) MoveFileExW(p.c_str(), (p + L".1").c_str(), MOVEFILE_REPLACE_EXISTING);
+        file = CreateFileW(p.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ, nullptr, OPEN_ALWAYS, 0, nullptr);
+    }
+    if (file != INVALID_HANDLE_VALUE) {
+        std::string line = Fmt("%04d-%02d-%02d %02d:%02d:%02d  ", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond) + buf + "\r\n";
+        DWORD w;
+        WriteFile(file, line.data(), (DWORD)line.size(), &w, nullptr);
+    }
     g_log.push_back({ Fmt("%02d:%02d:%02d", t.wHour, t.wMinute, t.wSecond), buf, lvl });
     if (g_log.size() > 5000) g_log.erase(g_log.begin(), g_log.begin() + 1000);
 }
@@ -296,6 +320,9 @@ void LoadSettings() {
     s.testMode = std::clamp(IniInt(L"test", L"mode", s.testMode), 0, 4);
     s.stabMin = std::clamp(IniInt(L"test", L"stabilite_min", s.stabMin), 1, 600);
     s.zoneAuto = IniInt(L"test", L"zone_auto", s.zoneAuto) != 0;
+    s.runs = IniInt(L"test", L"passages", s.runs) >= 3 ? 3 : 1;
+    s.notify = IniInt(L"apparence", L"notification", s.notify) != 0;
+    s.guideDone = IniInt(L"apparence", L"assistant_vu", s.guideDone) != 0;
     s.release = IniInt(L"connexion", L"liberer", s.release) != 0;
     s.updates = IniInt(L"apparence", L"maj", s.updates) != 0;
     s.fwBackup = IniInt(L"firmware", L"sauvegarde", s.fwBackup) != 0;
@@ -334,6 +361,9 @@ void SaveSettings() {
     puti(L"test", L"mode", s.testMode);
     puti(L"test", L"stabilite_min", s.stabMin);
     puti(L"test", L"zone_auto", s.zoneAuto);
+    puti(L"test", L"passages", s.runs);
+    puti(L"apparence", L"notification", s.notify);
+    puti(L"apparence", L"assistant_vu", s.guideDone);
     puti(L"connexion", L"liberer", s.release);
     puti(L"apparence", L"maj", s.updates);
     puti(L"firmware", L"sauvegarde", s.fwBackup);

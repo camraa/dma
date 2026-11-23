@@ -412,7 +412,7 @@ void DiagAction(const Fix& f) {
 }
 
 // Masque le nom d'utilisateur dans les chemins (C:\Users\xxx\ -> C:\Users\…\)
-static std::string Anon(std::string s) {
+std::string Anon(std::string s) {
     std::string low = Lower(s);
     size_t p = 0;
     while ((p = low.find("\\users\\", p)) != std::string::npos) {

@@ -347,6 +347,7 @@ bool DevConnect(bool veryVerbose) {
         d.paMax = 0x47FFFFFFFULL;
         d.maxMem = MaxText(d.paMax);
         d.usbLink = UsbSpeedText(3);
+        d.pcieLink = "gen2 x1";
         d.lowTop = 0x80000000ULL; d.highTop = 0x480000000ULL; d.ramBytes = 16ULL << 30; d.ramProbed = true;
         { std::lock_guard<std::mutex> l(g_devMx); g_dev = d; g_devErr = {}; }
         g_sim = true;
@@ -372,8 +373,7 @@ bool DevConnect(bool veryVerbose) {
 
     LC_CONFIG cfg = {};
     cfg.dwVersion = LC_CONFIG_VERSION;
-    cfg.dwPrintfVerbosity = LC_CONFIG_PRINTF_ENABLED;
-    if (g_set.journal >= 1 || veryVerbose) cfg.dwPrintfVerbosity |= LC_CONFIG_PRINTF_V;
+    cfg.dwPrintfVerbosity = LC_CONFIG_PRINTF_ENABLED | LC_CONFIG_PRINTF_V;   // V : donne le lien PCIe (le Journal filtre)
     if (g_set.journal >= 2 || veryVerbose) cfg.dwPrintfVerbosity |= LC_CONFIG_PRINTF_VV;
     strncpy_s(cfg.szDevice, dev.c_str(), _TRUNCATE);
     cfg.pfn_printf_opt = LcPrintf;
@@ -412,6 +412,11 @@ bool DevConnect(bool veryVerbose) {
     d.paMax = cfg.paMax;
     if (!d.paMax) LC.GetOption(h, LC_OPT_CORE_ADDR_MAX, &d.paMax);
     d.maxMem = MaxText(d.paMax);
+
+    for (auto& m : LcMessages()) {
+        std::string l = ParsePcieLink(m);
+        if (!l.empty()) d.pcieLink = l;
+    }
 
     // Lien USB de la carte (FT601/FT600)
     for (auto& u : FindFt60x(false)) {
@@ -466,9 +471,25 @@ void DevRelease() {
     g_connState = CS_RELEASED;
 }
 
+// « ... PCIe gen2 x1 ... » -> « gen2 x1 »
+std::string ParsePcieLink(const std::string& line) {
+    size_t k = line.find("PCIe gen");
+    if (k == std::string::npos) return "";
+    int g = 0, w = 0;
+    if (sscanf_s(line.c_str() + k, "PCIe gen%d x%d", &g, &w) != 2) return "";
+    return Fmt("gen%d x%d", g, w);
+}
+
+static std::mutex g_usbMx;
+static UsbDev g_usb;
+UsbDev CardUsb() { std::lock_guard<std::mutex> l(g_usbMx); return g_usb; }
+
 static bool CardPresent() {
-    for (auto& u : FindFt60x(false)) if (!u.problem) return true;
-    return false;
+    UsbDev best;
+    for (auto& u : FindFt60x(false)) if (!best.present || (best.problem && !u.problem)) best = u;
+    std::lock_guard<std::mutex> l(g_usbMx);
+    g_usb = best;
+    return best.present && !best.problem;
 }
 
 // Surveille le branchement USB de la carte : débranchée, on ferme ; rebranchée, on reconnecte

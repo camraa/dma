@@ -44,7 +44,8 @@ struct BenchState {
     int sDips = 0, sDrops = 0;
     // Contexte du dernier test
     bool hasResult = false, simulated = false;
-    std::string date, devString;
+    std::string date, devString, note, pcieLink;
+    int usbSpeed = -1, run = 0, runs = 1;
     Tx zone, fpga, fw, pcie, maxMem, usb, ram;
     u64 zoneBase = 0, zoneMb = 0;
     double duration = 0;
@@ -52,7 +53,9 @@ struct BenchState {
 
 BenchState BenchCopy();
 std::vector<int> TestsForMode(int mode);
-bool BenchStart(int mode);
+bool BenchStart(int mode, const std::string& note = "", bool stay = false);   // stay : ne change pas de page
+Tx Bottleneck(double best, int usbSpeed, const std::string& pcie);             // ce qui limite le débit
+double StabDrift(const std::vector<StabSample>& s);                            // baisse lente en %, 0 si trop court
 void BenchStop();
 
 // Verdicts

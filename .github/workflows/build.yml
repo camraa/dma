@@ -16,6 +16,14 @@ jobs:
       - name: Compilation et paquet
         shell: cmd
         run: make_dist.bat
+      - name: Tests sans carte
+        shell: pwsh
+        run: |
+          $d = "$env:RUNNER_TEMP\ct"
+          $p = Start-Process "out\Camra's Tool.exe" -ArgumentList "--test", "--data=$d" -PassThru
+          if (-not $p.WaitForExit(180000)) { $p.Kill(); throw "tests bloques" }
+          Get-Content "$d\tests.txt"
+          if ($p.ExitCode -ne 0) { throw "$($p.ExitCode) echec(s)" }
       - uses: actions/upload-artifact@v4
         with:
           name: Camras-Tool
@@ -25,4 +33,4 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/*.zip --title "Camra's Tool ${GITHUB_REF_NAME#v}" --notes-file NOTES.md
+        run: gh release create "$GITHUB_REF_NAME" dist/*.zip dist/Camras-Tool.exe --title "Camra's Tool ${GITHUB_REF_NAME#v}" --notes-file NOTES.md

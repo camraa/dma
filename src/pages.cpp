@@ -207,7 +207,8 @@ void PageHeaderButtons(int page, float rightEdge) {
         }
         if (c == 2) DiagStart();
     } else if (page == PG_LOG) {
-        int c = HeaderButtons({ { T("Effacer", "Clear"), B_NEUTRAL, false }, { T("Copier", "Copy"), B_NEUTRAL, false } }, rightEdge);
+        int c = HeaderButtons({ { T("Effacer", "Clear"), B_NEUTRAL, false }, { T("Copier", "Copy"), B_NEUTRAL, false }, { T("Signaler un problème", "Report a problem"), B_PRIMARY, false } }, rightEdge);
+        if (c == 2) ReportProblem();
         if (c == 0) LogClear();
         if (c == 1) {
             std::string s;
@@ -325,6 +326,7 @@ void PageSpeed() {
             Progress((float)b.progress, Avail(), P.accent);
         } else {
             int idx = (int)(std::find(b.order.begin(), b.order.end(), b.current) - b.order.begin());
+            if (b.runs > 1) { ImGui::TextColored(P.text2, T("Passage %d / %d", "Run %d / %d"), b.run + 1, b.runs); ImGui::SameLine(); }
             ImGui::Text("%s · %d / %d", b.current >= 0 ? (g_en ? TESTS[b.current].nameEn : TESTS[b.current].nameFr) : "", idx + 1, (int)b.order.size());
             float tot = (float)b.order.size();
             Progress(tot > 0 ? (float)(idx + b.progress) / tot : 0, Avail(), P.accent);
@@ -343,7 +345,7 @@ void PageSpeed() {
             ImGui::TextColored(P.text2, "%s", Fmt(T("Débit en continu · %d min · scatter 256 pages aléatoires, sans pause", "Continuous throughput · %d min · 256 random-page scatter, non-stop"), g_set.stabMin).c_str());
         else {
             int n = (int)TestsForMode(g_set.testMode).size();
-            ImGui::TextColored(P.text2, "%s", Fmt(T("%d tests · ~%d s", "%d tests · ~%d s"), n, n * g_set.duration).c_str());
+            ImGui::TextColored(P.text2, "%s", Fmt(T("%d tests · ~%d s", "%d tests · ~%d s"), n, n * g_set.duration * g_set.runs).c_str());
         }
         Tx err;
         std::vector<Range> r = TestRanges(&err);
@@ -396,6 +398,9 @@ void PageSpeed() {
                                      : T("Lien instable : coupures ou nombreuses erreurs. Voir le diagnostic.", "Unstable link: dropouts or many errors. See the diagnostics.");
             ImGui::TextColored(vc, "%s%s", b.running ? T("Verdict provisoire : ", "Provisional verdict: ") : "", vt);
         }
+        double drift = StabDrift(b.stab);
+        if (drift < -8)
+            ImGui::TextColored(P.orange, "%s", Fmt(T("Le débit baisse lentement : %s %% depuis le début. La carte chauffe peut-être.", "Throughput is slowly dropping: %s%% since the start. The card may be heating up."), Num(drift, 0).c_str()).c_str());
         if (b.running) Small(P.text3, T("Laissez le PC cible allumé et ne touchez pas au câble pendant le test.", "Keep the target PC on and do not touch the cable during the test."));
         EndCard();
         return;
@@ -406,7 +411,7 @@ void PageSpeed() {
     float lw = Avail() * 0.42f;
     BeginCard("##steps", lw);
     Section(T("Étapes", "Steps"));
-    if (b.running) Small(P.text3, Fmt(T("%d tests · ~%d s", "%d tests · ~%d s"), (int)order.size(), (int)(order.size() * b.duration)).c_str(), false);
+    if (b.running) Small(P.text3, Fmt(T("%d tests · ~%d s", "%d tests · ~%d s"), (int)order.size(), (int)(order.size() * b.duration * b.runs)).c_str(), false);
     else if (b.hasResult && !b.stability)
         Small(P.text3, b.stopped ? Fmt(T("Interrompu · %d / %d", "Stopped · %d / %d"), b.doneCount, (int)order.size()).c_str()
                                  : Fmt(T("Terminé · %d tests", "Done · %d tests"), (int)order.size()).c_str(), false);
@@ -544,6 +549,13 @@ void PageResults() {
     Small(P.text3, Fmt(T("%s lecture%s en échec", "%s failed read%s"), Num((double)failed, 0).c_str(), Pl((long long)failed).c_str()).c_str(), false);
     EndCard();
     ImGui::Dummy(ImVec2(0, 4 * S));
+
+    // Ce qui limite le débit
+    if (best > 0 && (b.res[3].ran || b.res[4].ran || b.res[6].ran || b.res[7].ran)) {
+        Tx lim = Bottleneck(best, b.usbSpeed, b.pcieLink);
+        Wrapped(best >= 150 ? P.text2 : P.orange, lim.c());
+        ImGui::Dummy(ImVec2(0, 2 * S));
+    }
 
     // Repère : meilleurs résultats déjà obtenus avec cette carte sur ce PC
     {
@@ -925,9 +937,13 @@ void PageDevice() {
     EndCard();
     ImGui::Dummy(ImVec2(0, 4 * S));
     BeginCard("##tip");
-    Section(T("Astuce", "Tip"));
+    Section(T("Aide", "Help"));
     Wrapped(P.text2, T("Camra's Tool contient déjà leechcore.dll, FTD3XX.dll et vcruntime140.dll : rien à installer. Branchez la carte sur un port USB 3 du PC de test.",
                        "Camra's Tool already contains leechcore.dll, FTD3XX.dll and vcruntime140.dll: nothing to install. Plug the card into a USB 3 port of the test PC."));
+    if (Button(T("Assistant de branchement", "Connection assistant"), B_PRIMARY)) g_openGuide = true;
+    if (Button(T("Comparer des câbles et des ports", "Compare cables and ports"))) g_openCable = true;
+    if (Button(T("Signaler un problème", "Report a problem"))) ReportProblem();
+    Help(T("Crée un zip avec le journal et le diagnostic, sans votre nom d'utilisateur. Rien n'est envoyé automatiquement.", "Creates a zip with the log and diagnostics, without your user name. Nothing is sent automatically."));
     EndCard();
     ImGui::EndGroup();
 }
@@ -1204,6 +1220,12 @@ void PageDiag() {
         if (Button(T("Aller au Speedtest", "Go to Speedtest"), B_PRIMARY)) g_page = PG_SPEED;
         EndCard();
     }
+    if (d.done && d.errors) {
+        ImGui::Dummy(ImVec2(0, 6 * S));
+        if (Button(T("Assistant de branchement", "Connection assistant"))) g_openGuide = true;
+        ImGui::SameLine();
+        if (Button(T("Signaler un problème", "Report a problem"))) ReportProblem();
+    }
     if (!d.lc.empty()) {
         ImGui::Dummy(ImVec2(0, 6 * S));
         Section(T("Messages LeechCore", "LeechCore messages"));
@@ -1294,6 +1316,12 @@ void PageSettings() {
            "Time spent on each test. Longer = steadier measurement: 3 s is usually enough, 10 s for a stability test."));
     ImGui::SetNextItemWidth(Avail());
     if (ImGui::SliderInt("##d", &g_set.duration, 1, 30, "%d s")) SaveSettings();
+    ImGui::TextColored(P.text2, "%s", T("Passages par test", "Runs per test"));
+    Help(T("3 passages : le test complet est répété 3 fois et la médiane est gardée. Plus long, mais chiffres plus réguliers.", "3 runs: the full test is repeated 3 times and the median is kept. Longer, but steadier figures."));
+    int rn = g_set.runs == 3 ? 1 : 0;
+    if (Segmented("runs", &rn, { T("1 passage", "1 run"), T("3 (médiane)", "3 (median)") })) { g_set.runs = rn ? 3 : 1; SaveSettings(); }
+    if (Switch(T("Son à la fin d'un test", "Sound when a test ends"), &g_set.notify)) SaveSettings();
+    Help(T("Un son et l'icône qui clignote si la fenêtre n'est pas au premier plan.", "A sound and a flashing icon if the window is not in front."));
     ImGui::TextColored(P.text2, "%s", T("Durée du test de stabilité", "Stability test duration"));
     Help(T("Durée du test de stabilité. 5 à 10 minutes suffisent pour un câble ou un port douteux ; 30 à 60 minutes révèlent une chauffe de la carte ou des coupures rares.",
            "Stability test duration. 5 to 10 minutes are enough for a doubtful cable or port; 30 to 60 minutes reveal card overheating or rare dropouts."));

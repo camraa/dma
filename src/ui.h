@@ -181,6 +181,8 @@ inline void Title(const char* text, float size = 22) {
     ImGui::PopFont();
 }
 
+inline float Avail0() { return ImGui::GetContentRegionAvail().x; }
+
 // Titre de section (petit, gris)
 inline void Section(const char* text) {
     PushFontSz(FSemi, Base - 1);

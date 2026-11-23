@@ -1,4 +1,4 @@
-﻿Camra's Tool 1.3.1 — DMA Speedtest
+﻿Camra's Tool 1.4.0 — DMA Speedtest
 Développé par 1sfk sur Discord
 ==================================
 
@@ -41,7 +41,7 @@ Code source : https://github.com/camraa/dma
 Les composants tiers gardent leur propre licence (LICENCES-TIERCES.txt).
 
 
-Camra's Tool 1.3.1 — DMA Speedtest (English)
+Camra's Tool 1.4.0 — DMA Speedtest (English)
 ============================================
 Nothing to install: run "Camra's Tool.exe" (Windows 10/11, 64-bit). Everything is built in.
 Plug the DMA card into a USB 3 port of this PC, keep the target PC on, close other DMA

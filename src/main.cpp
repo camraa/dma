@@ -208,7 +208,11 @@ static void Sidebar(float w, float hgt) {
     std::string upd = UpdateAvailable();
     if (!upd.empty()) {
         ImGui::SetCursorPos(ImVec2(12 * S, hgt - 112 * S));
-        if (Button(Fmt(T("Version %s disponible", "Version %s available"), upd.c_str()).c_str(), B_PRIMARY, ImVec2(w - 24 * S, 32 * S))) OpenUrl(RELEASES_URL);
+        if (Button(Fmt(T("Version %s disponible", "Version %s available"), upd.c_str()).c_str(), B_PRIMARY, ImVec2(w - 24 * S, 32 * S), UpdateBusy() || JobRunning() || FwCopy().running)) {
+            std::wstring q = U2W(Fmt(T("Installer la version %s ?\n\nElle est téléchargée depuis GitHub et son empreinte est vérifiée, puis l'application redémarre.",
+                                       "Install version %s?\n\nIt is downloaded from GitHub and its hash is verified, then the app restarts."), upd.c_str()));
+            if (MessageBoxW(g_hwnd, q.c_str(), L"Camra's Tool", MB_YESNO | MB_ICONQUESTION) == IDYES) UpdateInstallAsync();
+        }
     }
     float ch = 56 * S;
     ImGui::SetCursorPos(ImVec2(12 * S, hgt - ch - 14 * S));
@@ -288,6 +292,8 @@ static void DrawUI() {
     ImGui::EndChild();
     ImGui::End();
 
+    DrawModals();
+
     // Notification en bas de la fenêtre
     ToastMsg t = ToastGet();
     double age = NowSec() - t.t;
@@ -313,9 +319,19 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     const wchar_t* drv = wcsstr(GetCommandLineW(), L"--install-driver=");
     if (drv) return RunDriverInstall(_wtoi(drv + 17));
 
+    if (wcsstr(GetCommandLineW(), L"--test")) {
+        CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+        ExtractBuiltinLibs();
+        return RunTests();
+    }
+    CrashInit();
+    bool afterUpdate = wcsstr(GetCommandLineW(), L"--after-update") != nullptr;
+
     // Une seule instance : une seule application à la fois peut utiliser la carte DMA
     HANDLE mtx = CreateMutexW(nullptr, TRUE, L"CamrasTool_SingleInstance");
-    if (GetLastError() == ERROR_ALREADY_EXISTS) {
+    if (GetLastError() == ERROR_ALREADY_EXISTS && afterUpdate) {
+        WaitForSingleObject(mtx, 15000);     // l'ancienne version se ferme
+    } else if (GetLastError() == ERROR_ALREADY_EXISTS) {
         HWND other = FindWindowW(L"CamrasToolWindow", nullptr);
         if (other) { ShowWindow(other, SW_RESTORE); SetForegroundWindow(other); }
         return 0;
@@ -335,6 +351,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     g_en = g_set.english;
 
     Log(L_INFO, T("%s %s démarré.", "%s %s started."), APP_NAME, APP_VERSION);
+    UpdateCleanup();
     ExtractBuiltinLibs();
     if (g_set.dll.empty() || !FileExists(g_set.dll)) {
         if (!FileExists(ExeDir() + L"\\leechcore.dll") && !FileExists(BuiltinLibDir() + L"\\leechcore.dll"))
@@ -379,11 +396,17 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
     ImGui_ImplWin32_Init(g_hwnd);
     ImGui_ImplDX11_Init(g_dev, g_ctx);
 
+    if (!g_set.guideDone && g_set.mode == MODE_FPGA && !flag(L"--")) g_openGuide = true;   // premier lancement
+    if (flag(L"--guide")) g_openGuide = true;
+    if (flag(L"--cable")) g_openCable = true;
+    if (flag(L"--crash")) std::thread([] { Sleep(1500); *(volatile int*)nullptr = 1; }).detach();
+    if (flag(L"--update")) std::thread([] { for (int i = 0; i < 100 && UpdateAvailable().empty(); i++) Sleep(100); UpdateInstallAsync(); }).detach();
+
     // Connexion automatique ; en cas d'échec, le diagnostic s'ouvre avec les solutions
     if (flag(L"--diag")) { g_page = PG_DIAG; DiagStart(); }
     else if (flag(L"--algos")) { g_page = PG_DEVICE; AlgoStart(); }
     else if (flag(L"--autostart")) BenchStart(g_set.testMode);
-    else if (!flag(L"--noconnect")) ConnectAsync(g_set.mode != MODE_SIM);
+    else if (!flag(L"--noconnect")) ConnectAsync(g_set.mode != MODE_SIM && !g_openGuide);
 
     // --selftest : après le test, écrit les exports à côté de l'exe et copie l'image
     if (flag(L"--selftest"))

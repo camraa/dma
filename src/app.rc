@@ -6,8 +6,8 @@
 103 RCDATA "..\\resources\\lib\\vcruntime140.dll"
 104 RCDATA "..\\obj\\kit.pak"
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION 1,3,1,0
-PRODUCTVERSION 1,3,1,0
+FILEVERSION 1,4,0,0
+PRODUCTVERSION 1,4,0,0
 FILEOS 0x40004
 FILETYPE 0x1
 BEGIN
@@ -17,11 +17,11 @@ BEGIN
     BEGIN
       VALUE "CompanyName", "1sfk"
       VALUE "FileDescription", "Camra's Tool - DMA Speedtest"
-      VALUE "FileVersion", "1.3.1"
+      VALUE "FileVersion", "1.4.0"
       VALUE "InternalName", "CamrasTool"
       VALUE "OriginalFilename", "Camra's Tool.exe"
       VALUE "ProductName", "Camra's Tool"
-      VALUE "ProductVersion", "1.3.1"
+      VALUE "ProductVersion", "1.4.0"
     END
   END
   BLOCK "VarFileInfo"

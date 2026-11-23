@@ -279,7 +279,20 @@ static void RunStability(Picker& pk, double total) {
 // ---------------------------------------------------------------------------
 static void SaveToHistory(const BenchState& b);
 
-bool BenchStart(int mode) {
+// Médiane des passages d'un même test
+static TestResult Median(std::vector<TestResult> v, int ti) {
+    std::sort(v.begin(), v.end(), [ti](const TestResult& a, const TestResult& b) { return ti == 0 ? a.latAvg < b.latAvg : a.mbps < b.mbps; });
+    return v[v.size() / 2];
+}
+
+static void NotifyEnd() {
+    if (!g_set.notify || !g_hwnd || GetForegroundWindow() == g_hwnd) return;
+    MessageBeep(MB_ICONASTERISK);
+    FLASHWINFO fi = { sizeof fi, g_hwnd, FLASHW_TRAY | FLASHW_TIMERNOFG, 3, 0 };
+    FlashWindowEx(&fi);
+}
+
+bool BenchStart(int mode, const std::string& note, bool stay) {
     if (JobRunning()) { Toast(T("Un test est en cours.", "A test is running."), true); return false; }
     std::vector<int> order = TestsForMode(mode);
     if (mode != TM_STABILITY && order.empty()) {
@@ -287,7 +300,7 @@ bool BenchStart(int mode) {
         return false;
     }
     g_stop = false;
-    return StartJob([mode, order] {
+    return StartJob([mode, order, note, stay] {
         extern void DiagStart();
         if (!DevOpen() && !DevConnect(false)) {
             Toast(Fmt(T("%s — la carte DMA ne répond pas. Consultez le diagnostic et les solutions à tester.",
@@ -312,6 +325,10 @@ bool BenchStart(int mode) {
             b.order = order;
             b.date = NowStamp();
             b.simulated = d.simulated;
+            b.note = note;
+            b.pcieLink = d.pcieLink;
+            b.usbSpeed = d.simulated ? 3 : d.usbLink.en.rfind("USB 3", 0) == 0 ? 3 : d.usbLink.en.rfind("USB 2", 0) == 0 ? 2 : d.usb2 ? 1 : -1;
+            b.runs = stab ? 1 : g_set.runs;
             b.devString = d.device;
             b.fpga = d.fpga; b.fw = d.firmware; b.pcie = d.pcie; b.maxMem = d.maxMem; b.usb = d.usbLink; b.ram = RamText(d);
             b.zone = ZoneText(ranges);
@@ -331,12 +348,21 @@ bool BenchStart(int mode) {
         } else {
             Log(L_INFO, T("Démarrage : zone 0x%llX + %llu Mo, %.0f s par test.", "Starting: range 0x%llX + %llu MB, %.0f s per test."),
                 (unsigned long long)snap.zoneBase, (unsigned long long)snap.zoneMb, snap.duration);
-            for (int ti : order) {
-                if (g_stop) break;
-                RunTest(ti, pk, snap.duration);
+            std::vector<TestResult> all[8];
+            for (int k = 0; k < snap.runs && !g_stop; k++) {
+                { std::lock_guard<std::mutex> l(g_bMx); g_b.run = k; g_b.doneCount = 0; }
+                for (int ti : order) {
+                    if (g_stop) break;
+                    RunTest(ti, pk, snap.duration);
+                    TestResult r = BenchCopy().res[ti];
+                    if (r.done && r.calls) all[ti].push_back(r);
+                }
             }
+            std::lock_guard<std::mutex> l(g_bMx);
+            for (int ti : order) if (!all[ti].empty()) g_b.res[ti] = Median(all[ti], ti);
         }
         DevRelease();
+        NotifyEnd();
         BenchState fin;
         {
             std::lock_guard<std::mutex> l(g_bMx);
@@ -355,6 +381,9 @@ bool BenchStart(int mode) {
                 (unsigned long long)fin.sFailed, fin.sDips, fin.sDrops);
             Toast(Fmt(T("Stabilité terminée · %s Mo/s en moyenne · lien %s", "Stability finished · %s MB/s average · %s link"),
                       Num(fin.sAvg, 1).c_str(), StabVerdictText(v)));
+            double drift = StabDrift(fin.stab);
+            if (drift < -8)
+                Log(L_WARN, T("Stabilité : le débit a baissé lentement de %.0f %% (chauffe possible de la carte).", "Stability: throughput slowly dropped by %.0f%% (the card may be heating up)."), -drift);
             if (fin.finished || fin.stabElapsed >= 60) SaveToHistory(fin);
         } else if (fin.stopped) {
             Log(L_WARN, "%s", T("Test interrompu.", "Test stopped."));
@@ -365,7 +394,7 @@ bool BenchStart(int mode) {
             Toast(best > 0 ? Fmt(T("Test terminé · débit max %s Mo/s", "Test finished · max throughput %s MB/s"), Num(best, 1).c_str())
                            : std::string(T("Test terminé", "Test finished")));
             SaveToHistory(fin);
-            g_page = PG_RESULTS;
+            if (!stay) g_page = PG_RESULTS;
         }
     });
 }
@@ -476,6 +505,28 @@ const char* RatingText(int r) {
     case R_POOR: return T("Faible", "Poor");
     }
     return "-";
+}
+
+// Compare la première et la dernière minute (hors 10 premières secondes) : une baisse lente évoque une chauffe
+double StabDrift(const std::vector<StabSample>& s) {
+    if (s.size() < 180) return 0;
+    double a = 0, z = 0;
+    for (size_t i = 0; i < 60; i++) { a += s[10 + i].mbps; z += s[s.size() - 60 + i].mbps; }
+    return a > 0 ? (z - a) / a * 100 : 0;
+}
+
+Tx Bottleneck(double best, int usb, const std::string& pcie) {
+    if (best <= 0) return {};
+    if (usb >= 0 && usb < 3)
+        return TX("Le lien USB 2 limite le débit (40 Mo/s au maximum) : changez de port ou de câble.", "The USB 2 link limits throughput (40 MB/s at most): change the port or cable.");
+    bool gen1x1 = pcie == "gen1 x1";
+    if (gen1x1 && best >= 120)
+        return TX("Le lien PCIe gen1 x1 de la carte limite sans doute le débit : c'est normal pour ce lien.", "The card's PCIe gen1 x1 link probably limits throughput: this is normal for that link.");
+    if (best >= 150)
+        return TX("Débit normal pour une carte FT601 en USB 3%s%s : rien ne le limite anormalement.", "Normal throughput for an FT601 card on USB 3%s%s: nothing limits it abnormally.", pcie.empty() ? "" : " · PCIe ", pcie.c_str());
+    return TX("Débit plus faible qu'attendu en USB 3%s%s. Causes fréquentes : algorithme FPGA (comparez-les dans Appareil), câble ou port USB, économies d'énergie PCIe du PC cible, firmware.",
+              "Lower throughput than expected on USB 3%s%s. Common causes: FPGA algorithm (compare them in Device), USB cable or port, PCIe power saving on the target PC, firmware.",
+              pcie.empty() ? "" : " · PCIe ", pcie.c_str());
 }
 
 int StabVerdict(const BenchState& b) {
@@ -710,6 +761,7 @@ static void SaveToHistory(const BenchState& b) {
     e.mode = b.mode;
     e.sim = b.simulated;
     e.device = b.devString;
+    e.note = b.note;
     e.fpga = b.fpga.s();
     e.fw = b.fw.s();
     e.usb = b.usb.s();

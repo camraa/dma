@@ -15,7 +15,9 @@
 #include <functional>
 
 #define APP_NAME    "Camra's Tool"
-#define APP_VERSION "1.3.1"
+#ifndef APP_VERSION
+#define APP_VERSION "1.4.0"
+#endif
 #define APP_AUTHOR  "1sfk"
 
 typedef uint64_t u64;
@@ -98,6 +100,9 @@ struct Settings {
     bool zoneAuto = true;
     bool release = true;                     // libère la carte après chaque opération
     bool updates = true;                     // cherche une nouvelle version au démarrage
+    int  runs = 1;                           // passages par test (médiane gardée)
+    bool notify = true;                      // son et clignotement à la fin d'un test
+    bool guideDone = false;                  // assistant déjà vu
     bool fwBackup = true;                    // sauvegarde la flash avant de l'écrire
     bool tests[8] = { true, true, true, true, true, true, true, true };
     bool dark = true;
@@ -121,6 +126,24 @@ extern HWND g_hwnd;
 // Mise à jour : dernière version publiée sur GitHub (vide si à jour ou inconnue)
 void UpdateCheckAsync();
 std::string UpdateAvailable();
+bool UpdateBusy();
+void UpdateInstallAsync();
+void UpdateCleanup();
+bool IsNewer(const std::string& a, const std::string& b);
+bool ParseRelease(const std::string& body, std::string& ver, std::string& url, std::string& sha);
+std::string Sha256(const std::string& d);
+
+// Support : plantage, signalement, tests
+std::wstring ReportDir();
+void CrashInit();
+void ReportProblem();
+std::string SupportZip();
+uint32_t Crc32(const std::string& s);
+std::string MakeZip(const std::vector<std::pair<std::string, std::string>>& files);
+bool IsDumpLine(const std::string& text);
+int RunTests();
+void DrawModals();
+extern bool g_openGuide, g_openCable;
 #define RELEASES_URL "https://github.com/camraa/dma/releases/latest"
 
 // Une seule opération sur la carte à la fois (connexion, test, diagnostic)
@@ -149,6 +172,7 @@ struct DeviceInfo {
     u64 fpgaId = 0, paMax = 0;
     Tx usbLink;                              // USB 3.0 · 5 Gb/s
     bool usb2 = false;
+    std::string pcieLink;                    // gen2 x1
     bool ramProbed = false;
     u64 lowTop = 0, highTop = 0, ramBytes = 0;
     std::vector<Range> ranges;               // zones lisibles (zones protégées exclues)
@@ -190,6 +214,8 @@ struct UsbDev {
 };
 std::vector<UsbDev> FindUsb(const wchar_t* vidpid, bool includeAbsent, bool interfaces);
 std::vector<UsbDev> FindFt60x(bool includeAbsent);
+UsbDev CardUsb();                            // dernier état vu par la surveillance
+std::string ParsePcieLink(const std::string& line);
 Tx UsbSpeedText(int speed);
 struct DriverState { bool active = false, staged = false; std::string version, service, inf; };
 DriverState FtdiDriver();

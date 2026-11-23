@@ -3,3 +3,5 @@ obj/
 dist/
 *.ini
 CamrasTool_history.txt
+CamrasTool.log*
+rapports/
