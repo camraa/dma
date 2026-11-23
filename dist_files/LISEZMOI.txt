@@ -34,6 +34,13 @@ Les réglages et l'historique sont enregistrés à côté de l'exe, ou dans
 %LOCALAPPDATA%\CamrasTool si ce dossier est protégé (ex. Program Files).
 
 
+LICENCE
+-------
+Camra's Tool est un logiciel libre sous GNU GPL version 3 (voir LICENCE-GPL3.txt).
+Code source : https://github.com/camraa/dma
+Les composants tiers gardent leur propre licence (LICENCES-TIERCES.txt).
+
+
 Camra's Tool 1.3.0 — DMA Speedtest (English)
 ============================================
 Nothing to install: run "Camra's Tool.exe" (Windows 10/11, 64-bit). Everything is built in.
@@ -41,3 +48,4 @@ Plug the DMA card into a USB 3 port of this PC, keep the target PC on, close oth
 software, then start the app. Switch the language with FR / EN at the top right.
 If a driver is missing, the Diagnostics tab offers an "Install the driver" button.
 If SmartScreen warns you: "More info" → "Run anyway" (the exe is not code-signed).
+License: GNU GPL version 3 (LICENCE-GPL3.txt). Source code: https://github.com/camraa/dma

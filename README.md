@@ -18,5 +18,7 @@ Visual Studio avec le développement C++ (MSVC x64 et SDK Windows), puis :
 ## Options de lancement
 `--sim` `--en` `--light` `--page=0..7` `--mode=0..4` `--autostart` `--diag` `--noconnect` `--nocard` `--algos` `--selftest`
 
-## Licences tierces
-Voir [LICENCES-TIERCES.txt](dist_files/LICENCES-TIERCES.txt) (LeechCore GPL-3, OpenOCD GPL-2, FTDI, WCH, Microsoft, ImGui MIT).
+## Licence
+Copyright (C) 2026 1sfk. Le code de Camra's Tool (`src/`, `tools/`, scripts) est sous [GNU GPL version 3](LICENSE).
+
+La GPL ne s'applique pas aux composants tiers de `resources/` et `third_party/` : chacun garde sa propre licence. Les fichiers FTDI, WCH et Microsoft sont propriétaires. Voir [LICENCES-TIERCES.txt](dist_files/LICENCES-TIERCES.txt).
