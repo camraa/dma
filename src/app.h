@@ -141,6 +141,8 @@ struct DeviceInfo {
     bool usb2 = false;
     bool ramProbed = false;
     u64 lowTop = 0, highTop = 0, ramBytes = 0;
+    std::vector<Range> ranges;               // zones lisibles (zones protégées exclues)
+    u64 excluded = 0;                        // octets exclus car illisibles en permanence
 };
 enum { CS_IDLE, CS_CONNECTING, CS_CONNECTED, CS_FAILED };
 extern std::atomic<int> g_connState;

@@ -276,7 +276,11 @@ static void DiagRun() {
             Log(L_INFO, T("Diagnostic : ouverture de « %s » (journal très verbeux)…", "Diagnostics: opening \"%s\" (very verbose log)…"), dev.c_str());
             LcMessagesClear();
             ok = DevConnect(true);
-            b.r.lc = LcMessages();
+            // Messages utiles seulement : les vidages de registres restent dans le Journal
+            for (auto& m : LcMessages()) {
+                std::string lo = Lower(m);
+                if (lo.find("device:") != std::string::npos || lo.find("error") != std::string::npos || lo.find("fail") != std::string::npos) b.r.lc.push_back(m);
+            }
         }
         dinfo = DevInfo();
         if (ok) {

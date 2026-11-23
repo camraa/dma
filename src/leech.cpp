@@ -237,6 +237,46 @@ static bool Readable(u64 pa) {
     return DevReadScatter(2, pas, &us) > 0;
 }
 
+// Cartographie [lo, hi) et garde les blocs lisibles. Une zone est exclue seulement si elle échoue 4 fois
+// de suite : ce sont des zones protégées du PC cible, pas des erreurs du lien (qui restent comptées).
+static void MapReadable(u64 lo, u64 hi, u64 step, DeviceInfo& d) {
+    if (hi <= lo) return;
+    std::vector<u64> todo;
+    for (u64 a = lo; a < hi; a += step) todo.push_back(a);
+    std::vector<char> ok(todo.size(), 0);
+    std::vector<size_t> left(todo.size());
+    for (size_t i = 0; i < left.size(); i++) left[i] = i;
+    for (int pass = 0; pass < 4 && !left.empty(); pass++) {
+        std::vector<size_t> next;
+        for (size_t i = 0; i < left.size(); i += 256) {
+            size_t n = std::min<size_t>(256, left.size() - i);
+            u64 pas[256];
+            double us;
+            for (size_t k = 0; k < n; k++) pas[k] = todo[left[i + k]];
+            DevReadScatter((int)n, pas, &us);
+            for (size_t k = 0; k < n; k++) {
+                if (g_scatter[k]->f) ok[left[i + k]] = 1;
+                else next.push_back(left[i + k]);
+            }
+        }
+        left.swap(next);
+    }
+    // Marge : un bloc voisin d'une zone illisible est écarté aussi
+    size_t n = todo.size();
+    u64 start = 0;
+    bool open = false;
+    auto close = [&](u64 end) {
+        if (open && end - start >= (16ULL << 20)) d.ranges.push_back({ start, end - start });
+        open = false;
+    };
+    for (size_t i = 0; i < n; i++) {
+        bool good = ok[i] && (i == 0 || ok[i - 1]) && (i + 1 == n || ok[i + 1]);
+        if (good && !open) { start = todo[i]; open = true; }
+        if (!good) close(todo[i]);
+    }
+    close(hi);
+}
+
 // Sonde la RAM du PC cible en lecture seule, en évitant la zone des périphériques entre 2 et 4 Go
 static void ProbeRam(DeviceInfo& d) {
     const u64 MB16 = 16ULL << 20, G2 = 0x80000000ULL, G4 = 0x100000000ULL;
@@ -260,6 +300,15 @@ static void ProbeRam(DeviceInfo& d) {
         }
         d.highTop = hi;
     }
+    // Zones lisibles : pas de 512 Ko, plus large au-delà de 32 Go pour rester rapide
+    u64 span = (d.lowTop - base) + (d.highTop > G4 ? d.highTop - G4 : 0);
+    u64 step = 512ULL << 10;
+    while (span / step > 65536) step *= 2;
+    MapReadable(base, d.lowTop, step, d);
+    if (d.highTop > G4) MapReadable(G4, d.highTop, step, d);
+    u64 kept = 0;
+    for (auto& r : d.ranges) kept += r.size;
+    d.excluded = span - kept;
     // Estimation de la RAM installée : sous 4 Go environ 3,25 Go sont utilisables
     double gb;
     if (d.highTop > G4) gb = (d.highTop - G4) / 1073741824.0 + 3.25;
@@ -272,6 +321,10 @@ static void ProbeRam(DeviceInfo& d) {
     Log(L_INFO, T("RAM du PC cible : %s (vérifiée jusqu'à 0x%llX sous 2 Go, 0x%llX au-dessus de 4 Go).",
                   "Target PC RAM: %s (verified up to 0x%llX below 2 GB, 0x%llX above 4 GB)."),
         RamText(d).c(), (unsigned long long)d.lowTop, (unsigned long long)d.highTop);
+    if (d.excluded)
+        Log(L_INFO, T("Zones illisibles du PC cible exclues du test : %s Mo (mémoire protégée, sans rapport avec le lien).",
+                      "Unreadable target PC areas excluded from the test: %s MB (protected memory, unrelated to the link)."),
+            Num((double)(d.excluded >> 20), 0).c_str());
 }
 
 // ---------------------------------------------------------------------------
@@ -430,6 +483,7 @@ bool ParseHex(const char* s, u64* v) {
 std::vector<Range> TestRanges(Tx* err) {
     DeviceInfo d = DevInfo();
     std::vector<Range> r;
+    if (g_set.zoneAuto && !d.ranges.empty()) return d.ranges;
     if (g_set.zoneAuto && d.ramProbed && d.lowTop > 0x10000000ULL) {
         r.push_back({ 0x10000000ULL, d.lowTop - 0x10000000ULL });
         if (d.highTop > 0x100000000ULL + (16ULL << 20)) r.push_back({ 0x100000000ULL, d.highTop - 0x100000000ULL });
