@@ -202,13 +202,19 @@ static void Sidebar(float w, float hgt) {
     if (cs == CS_CONNECTING) { col = P.orange; title = T("Connexion…", "Connecting…"); sub = T("Ouverture du périphérique", "Opening the device"); }
     else if (di.connected && di.simulated) { col = P.orange; title = "Simulation"; sub = T("Données fictives, aucune carte", "Fake data, no card"); }
     else if (di.connected) { col = P.green; title = T("Connecté", "Connected"); sub = di.fpga.s(); }
+    else if (di.released) { col = P.green; title = T("Prête", "Ready"); sub = di.fpga.s(); }
     else { col = P.red; title = T("Carte non connectée", "Card not connected"); sub = T("Voir le diagnostic", "View diagnostics"); }
     if (b.running) sub = b.stability ? T("Test de stabilité…", "Stability test…") : T("Test en cours…", "Test running…");
+    std::string upd = UpdateAvailable();
+    if (!upd.empty()) {
+        ImGui::SetCursorPos(ImVec2(12 * S, hgt - 112 * S));
+        if (Button(Fmt(T("Version %s disponible", "Version %s available"), upd.c_str()).c_str(), B_PRIMARY, ImVec2(w - 24 * S, 32 * S))) OpenUrl(RELEASES_URL);
+    }
     float ch = 56 * S;
     ImGui::SetCursorPos(ImVec2(12 * S, hgt - ch - 14 * S));
     ImVec2 p = ImGui::GetCursorScreenPos();
     float cw = w - 24 * S;
-    if (ImGui::InvisibleButton("##status", ImVec2(cw, ch))) g_page = di.connected ? PG_DEVICE : PG_DIAG;
+    if (ImGui::InvisibleButton("##status", ImVec2(cw, ch))) g_page = di.connected || di.released ? PG_DEVICE : PG_DIAG;
     bool hov = ImGui::IsItemHovered();
     ImDrawList* dl = ImGui::GetWindowDrawList();
     dl->AddRectFilled(p, ImVec2(p.x + cw, p.y + ch), U(hov ? P.card2 : P.card), 10 * S);
@@ -303,6 +309,10 @@ static void DrawUI() {
 //  Point d'entrée
 // ---------------------------------------------------------------------------
 int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
+    // Relance en administrateur pour installer un pilote : pas de fenêtre
+    const wchar_t* drv = wcsstr(GetCommandLineW(), L"--install-driver=");
+    if (drv) return RunDriverInstall(_wtoi(drv + 17));
+
     // Une seule instance : une seule application à la fois peut utiliser la carte DMA
     HANDLE mtx = CreateMutexW(nullptr, TRUE, L"CamrasTool_SingleInstance");
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
@@ -371,8 +381,24 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
 
     // Connexion automatique ; en cas d'échec, le diagnostic s'ouvre avec les solutions
     if (flag(L"--diag")) { g_page = PG_DIAG; DiagStart(); }
+    else if (flag(L"--algos")) { g_page = PG_DEVICE; AlgoStart(); }
     else if (flag(L"--autostart")) BenchStart(g_set.testMode);
     else if (!flag(L"--noconnect")) ConnectAsync(g_set.mode != MODE_SIM);
+
+    // --selftest : après le test, écrit les exports à côté de l'exe et copie l'image
+    if (flag(L"--selftest"))
+        std::thread([] {
+            for (int i = 0; i < 1200 && !BenchCopy().hasResult; i++) Sleep(100);
+            BenchState b = BenchCopy();
+            std::string j = ResultsJson(b), c = ResultsCsv(b), d = ResultsDiscord(b);
+            WriteFileAll(DataDir() + L"\\selftest.json", j.data(), j.size());
+            WriteFileAll(DataDir() + L"\\selftest.csv", c.data(), c.size());
+            WriteFileAll(DataDir() + L"\\selftest.txt", d.data(), d.size());
+            ResultsImage(b, (DataDir() + L"\\selftest.png").c_str());
+            ResultsImage(b);
+        }).detach();
+    DevMonitorStart();
+    if (g_set.updates) UpdateCheckAsync();
 
     bool done = false;
     while (!done) {

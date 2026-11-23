@@ -8,6 +8,8 @@
 #include <usbioctl.h>
 #include <tlhelp32.h>
 #include <shellapi.h>
+#include <sddl.h>
+#include <objbase.h>
 #include <thread>
 #include <algorithm>
 
@@ -254,8 +256,50 @@ int PeArch(const std::wstring& path) {
 }
 
 // ---------------------------------------------------------------------------
-//  Installation d'un pilote intégré : pnputil en administrateur (une demande UAC)
+//  Installation d'un pilote intégré. L'exe se relance en administrateur, extrait le pilote de ses
+//  propres ressources dans un dossier que seuls les administrateurs peuvent modifier, puis lance
+//  pnputil : aucun fichier modifiable par un autre programme n'est installé.
 // ---------------------------------------------------------------------------
+int RunDriverInstall(int which) {
+    if (which < 0 || which > 1) return 87;
+    GUID g;
+    if (FAILED(CoCreateGuid(&g))) return 1;
+    wchar_t gs[64];
+    swprintf_s(gs, L"%08lX%04X%04X", g.Data1, g.Data2, g.Data3);
+    std::wstring dir = WinDir() + L"\\Temp\\CamrasTool-" + gs;
+    SECURITY_ATTRIBUTES sa = { sizeof sa };
+    if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(L"O:BAD:P(A;OICI;FA;;;BA)(A;OICI;FA;;;SY)", SDDL_REVISION_1, &sa.lpSecurityDescriptor, nullptr)) return (int)GetLastError();
+    BOOL made = CreateDirectoryW(dir.c_str(), &sa);
+    DWORD err = GetLastError();
+    LocalFree(sa.lpSecurityDescriptor);
+    if (!made) return (int)err;
+    DWORD code = 1;
+    if (ExtractKitPrefix(which == 0 ? L"drivers\\ftdi\\" : L"drivers\\ch341\\", dir)) {
+        std::wstring exe = WinDir() + L"\\System32\\pnputil.exe";
+        std::wstring cl = L"\"" + exe + L"\" /add-driver \"" + dir + (which == 0 ? L"\\ftdibus3.Inf" : L"\\CH341WDM.INF") + L"\" /install";
+        STARTUPINFOW si = { sizeof si };
+        si.dwFlags = STARTF_USESHOWWINDOW;
+        si.wShowWindow = SW_HIDE;
+        PROCESS_INFORMATION pi = {};
+        std::vector<wchar_t> b(cl.begin(), cl.end());
+        b.push_back(0);
+        if (CreateProcessW(exe.c_str(), b.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
+            WaitForSingleObject(pi.hProcess, 4 * 60 * 1000);
+            GetExitCodeProcess(pi.hProcess, &code);
+            CloseHandle(pi.hProcess);
+            CloseHandle(pi.hThread);
+        } else code = GetLastError();
+    }
+    WIN32_FIND_DATAW fd;
+    HANDLE h = FindFirstFileW((dir + L"\\*").c_str(), &fd);
+    if (h != INVALID_HANDLE_VALUE) {
+        do { if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) DeleteFileW((dir + L"\\" + fd.cFileName).c_str()); } while (FindNextFileW(h, &fd));
+        FindClose(h);
+    }
+    RemoveDirectoryW(dir.c_str());
+    return (int)code;
+}
+
 static std::atomic<bool> g_drvBusy{ false };
 bool DriverInstalling() { return g_drvBusy; }
 
@@ -271,28 +315,29 @@ void InstallDriverAsync(int which) {
             Log(err ? L_ERR : L_OK, err ? T("Pilote : ÉCHEC — %s", "Driver: FAILED — %s") : T("Pilote : %s", "Driver: %s"), msg.c_str());
             Toast(msg, err);
             g_drvBusy = false;
+            if (!err) {                      // le diagnostic se met à jour tout seul
+                extern void DiagStart();
+                for (int i = 0; i < 200 && JobRunning(); i++) Sleep(50);
+                DiagStart();
+            }
         };
-        for (int i = 0; i < 600 && !KitReady(); i++) { KitEnsureAsync(); Sleep(50); }
-        if (!KitReady()) return done(T("Kit de flashage absent de l'exécutable.", "Flashing kit missing from the executable."), true);
-        std::wstring inf = KitDir() + L"\\drivers\\" + (which == 0 ? L"ftdi\\ftdibus3.Inf" : L"ch341\\CH341WDM.INF");
-        std::wstring logf = KitDir() + L"\\drivers\\pnputil.log";
-        DeleteFileW(logf.c_str());
-        std::wstring params = L"/c \"pnputil.exe /add-driver \"" + inf + L"\" /install > \"" + logf + L"\" 2>&1\"";
-        Log(L_INFO, T("Pilote %s : installation de %s (demande administrateur)…", "Driver %s: installing %s (administrator prompt)…"), name, FileName(inf).c_str());
-        Log(L_INFO, "> pnputil /add-driver \"%s\" /install", W2U(inf).c_str());
+        wchar_t self[MAX_PATH * 2];
+        GetModuleFileNameW(nullptr, self, MAX_PATH * 2);
+        std::wstring params = L"--install-driver=" + std::to_wstring(which);
+        Log(L_INFO, T("Pilote %s : installation (demande administrateur)…", "Driver %s: installing (administrator prompt)…"), name);
         Toast(T("Acceptez la demande administrateur pour installer le pilote.", "Accept the administrator prompt to install the driver."));
         SHELLEXECUTEINFOW sei = { sizeof sei };
         sei.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC;
         sei.hwnd = g_hwnd;
         sei.lpVerb = L"runas";
-        sei.lpFile = L"cmd.exe";
+        sei.lpFile = self;
         sei.lpParameters = params.c_str();
         sei.nShow = SW_HIDE;
         if (!ShellExecuteExW(&sei) || !sei.hProcess) {
             DWORD e = GetLastError();
             if (e == ERROR_CANCELLED)
                 return done(Fmt(T("Installation du pilote %s annulée (autorisation administrateur refusée).", "%s driver installation cancelled (administrator permission denied)."), name), true);
-            return done(Fmt(T("Impossible de lancer pnputil (erreur %lu).", "Could not start pnputil (error %lu)."), e), true);
+            return done(Fmt(T("Impossible de lancer l'installation (erreur %lu).", "Could not start the installation (error %lu)."), e), true);
         }
         if (WaitForSingleObject(sei.hProcess, 5 * 60 * 1000) == WAIT_TIMEOUT) {
             CloseHandle(sei.hProcess);
@@ -301,25 +346,10 @@ void InstallDriverAsync(int which) {
         DWORD code = 1;
         GetExitCodeProcess(sei.hProcess, &code);
         CloseHandle(sei.hProcess);
-        std::string out;
-        if (ReadFileAll(logf, out)) {
-            int n = MultiByteToWideChar(CP_OEMCP, 0, out.data(), (int)out.size(), nullptr, 0);
-            std::wstring w((size_t)n, L'\0');
-            MultiByteToWideChar(CP_OEMCP, 0, out.data(), (int)out.size(), &w[0], n);
-            std::string u = W2U(w);
-            size_t s = 0;
-            while (s < u.size()) {
-                size_t e = u.find('\n', s);
-                std::string line = u.substr(s, e == std::string::npos ? std::string::npos : e - s);
-                while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
-                if (!line.empty()) Log(L_INFO, "[pnputil] %s", line.c_str());
-                if (e == std::string::npos) break;
-                s = e + 1;
-            }
-        }
+        Log(L_INFO, "[pnputil] code %lu", code);
         if (code == 0) return done(Fmt(T("Pilote %s installé. Débranchez puis rebranchez la carte.", "%s driver installed. Unplug and replug the card."), name), false);
         if (code == 3010) return done(Fmt(T("Pilote %s installé. Redémarrez le PC pour terminer.", "%s driver installed. Restart the PC to finish."), name), false);
         if (code == 259) return done(Fmt(T("Pilote %s ajouté à Windows : il s'activera au branchement de la carte.", "%s driver added to Windows: it will activate when the card is plugged in."), name), false);
-        done(Fmt(T("pnputil a échoué (code %lu) : voir la console du Firmware ou le Journal.", "pnputil failed (code %lu): see the Firmware console or the Log."), code), true);
+        done(Fmt(T("pnputil a échoué (code %lu).", "pnputil failed (code %lu)."), code), true);
     }).detach();
 }

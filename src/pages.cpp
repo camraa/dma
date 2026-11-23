@@ -182,12 +182,17 @@ void PageHeaderButtons(int page, float rightEdge) {
     if (page == PG_RESULTS) {
         BenchState b = BenchCopy();
         if (!b.hasResult || b.running) return;
-        int c = HeaderButtons({ { T("Copier pour Discord", "Copy for Discord"), B_NEUTRAL, false },
+        int c = HeaderButtons({ { T("Copier l'image", "Copy image"), B_PRIMARY, false },
+                                { T("Copier pour Discord", "Copy for Discord"), B_NEUTRAL, false },
                                 { T("Exporter CSV", "Export CSV"), B_NEUTRAL, false },
                                 { T("Exporter JSON", "Export JSON"), B_NEUTRAL, false } }, rightEdge);
-        if (c == 0) CopyDiscord(ResultsDiscord(b));
-        if (c == 1) ExportFile("csv", ResultsCsv(b));
-        if (c == 2) ExportFile("json", ResultsJson(b));
+        if (c == 0) {
+            if (ResultsImage(b)) Toast(T("Image copiée : collez-la dans Discord.", "Image copied: paste it into Discord."));
+            else Toast(T("Presse-papiers indisponible : réessayez.", "Clipboard unavailable: try again."), true);
+        }
+        if (c == 1) CopyDiscord(ResultsDiscord(b));
+        if (c == 2) ExportFile("csv", ResultsCsv(b));
+        if (c == 3) ExportFile("json", ResultsJson(b));
     } else if (page == PG_DIAG) {
         DiagResult d = DiagCopy();
         bool has = d.done && !d.running;
@@ -540,6 +545,58 @@ void PageResults() {
     EndCard();
     ImGui::Dummy(ImVec2(0, 4 * S));
 
+    // Repère : meilleurs résultats déjà obtenus avec cette carte sur ce PC
+    {
+        double refM = 0, refL = 0;
+        int n = 0;
+        for (auto& e : HistoryCopy()) {
+            if (e.kind != 0 || e.sim != b.simulated || e.fpga != b.fpga.s() || b.date.compare(0, 16, e.date) == 0) continue;
+            n++;
+            refM = std::max(refM, e.maxMbps);
+            if (e.latAvg > 0 && (refL == 0 || e.latAvg < refL)) refL = e.latAvg;
+        }
+        if (n && refM > 0 && best > 0) {
+            double pm = best / refM * 100;
+            std::string s = Fmt(T("Par rapport à vos %d test%s avec cette carte : débit à %s %% du record (%s Mo/s)", "Compared with your %d test%s with this card: throughput at %s%% of the record (%s MB/s)"),
+                                n, Pl(n).c_str(), Num(pm, 0).c_str(), Num(refM, 1).c_str());
+            if (refL > 0 && L.calls) s += Fmt(T(" · latence %s µs, record %s µs", " · latency %s µs, record %s µs"), Num(L.latAvg, 1).c_str(), Num(refL, 1).c_str());
+            ImGui::TextColored(pm < 80 ? P.orange : P.text2, "%s", s.c_str());
+            ImGui::Dummy(ImVec2(0, 2 * S));
+        }
+    }
+
+    // Répartition de la latence
+    if (L.calls && !L.hist.empty()) {
+        BeginCard("##hist");
+        Section(T("Répartition de la latence", "Latency distribution"));
+        Help(T("Part des lectures pour chaque durée. Un pic étroit à gauche = carte régulière. La dernière barre regroupe les lectures les plus lentes.",
+               "Share of reads for each duration. A narrow peak on the left = steady card. The last bar gathers the slowest reads."));
+        ImVec2 hp = ImGui::GetCursorScreenPos();
+        ImVec2 hs = ImVec2(Avail(), 90 * S);
+        ImGui::InvisibleButton("##h", hs);
+        bool hov = ImGui::IsItemHovered();
+        ImDrawList* hd = ImGui::GetWindowDrawList();
+        float mx = *std::max_element(L.hist.begin(), L.hist.end());
+        float bw = hs.x / L.hist.size();
+        for (size_t i = 0; i < L.hist.size(); i++) {
+            float bh = mx > 0 ? L.hist[i] / mx * hs.y : 0;
+            if (L.hist[i] > 0) bh = std::max(bh, 2 * S);
+            hd->AddRectFilled(ImVec2(hp.x + bw * i + 1, hp.y + hs.y - bh), ImVec2(hp.x + bw * (i + 1) - 1, hp.y + hs.y), U(i + 1 == L.hist.size() ? P.orange : P.accent), 2 * S);
+        }
+        if (hov) {
+            int i = (int)((ImGui::GetIO().MousePos.x - hp.x) / bw);
+            if (i >= 0 && i < (int)L.hist.size()) {
+                double lo = L.histMin + i * L.histStep;
+                if (i + 1 == (int)L.hist.size()) ImGui::SetTooltip("> %.0f µs : %.2f %%", lo, L.hist[(size_t)i]);
+                else ImGui::SetTooltip("%.0f – %.0f µs : %.2f %%", lo, lo + L.histStep, L.hist[(size_t)i]);
+            }
+        }
+        Small(P.text2, Fmt(T("min %s · médiane %s · p99 %s · p99,9 %s · max %s µs · %s pics (plus de 2 fois la médiane)", "min %s · median %s · p99 %s · p99.9 %s · max %s µs · %s spikes (over twice the median)"),
+                           Num(L.latMin, 0).c_str(), Num(L.latP50, 0).c_str(), Num(L.latP99, 0).c_str(), Num(L.latP999, 0).c_str(), Num(L.latMax, 0).c_str(), Num((double)L.spikes, 0).c_str()).c_str());
+        EndCard();
+        ImGui::Dummy(ImVec2(0, 4 * S));
+    }
+
     // Tableau
     BeginCard("##tbl");
     if (ImGui::BeginTable("##res", 6, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingStretchProp)) {
@@ -769,11 +826,14 @@ void PageDevice() {
         SaveSettings();
         if (d.connected) { StartJob([] { DevDisconnect(); }); Toast(T("Réglages modifiés · reconnexion au prochain test", "Settings changed · reconnects on next test")); }
     }
+    if (Switch(T("Libérer la carte après chaque opération", "Release the card after each operation"), &g_set.release)) SaveSettings();
+    Help(T("La carte n'est ouverte que pendant une connexion, un test ou un diagnostic. Les autres logiciels DMA peuvent l'utiliser le reste du temps.",
+           "The card is only opened during a connection, test or diagnostic. Other DMA software can use it the rest of the time."));
     ImGui::Separator();
-    ImVec4 dc = cs == CS_CONNECTED ? (d.simulated ? P.orange : P.green) : cs == CS_CONNECTING ? P.orange : cs == CS_FAILED ? P.red : P.text3;
+    ImVec4 dc = cs == CS_RELEASED ? P.green : cs == CS_CONNECTED ? (d.simulated ? P.orange : P.green) : cs == CS_CONNECTING ? P.orange : cs == CS_FAILED ? P.red : P.text3;
     Dot(dc);
     ImGui::SameLine();
-    const char* st = cs == CS_CONNECTED ? T("Connecté", "Connected") : cs == CS_CONNECTING ? T("Connexion…", "Connecting…") : cs == CS_FAILED ? T("Échec", "Failed") : T("Déconnecté", "Disconnected");
+    const char* st = cs == CS_CONNECTED ? T("Connecté", "Connected") : cs == CS_RELEASED ? T("Prête · carte libérée", "Ready · card released") : cs == CS_CONNECTING ? T("Connexion…", "Connecting…") : cs == CS_FAILED ? T("Échec", "Failed") : T("Déconnecté", "Disconnected");
     ImGui::Text("%s%s%s", st, cs == CS_CONNECTED ? " · " : "", cs == CS_CONNECTED ? d.device.c_str() : "");
     if (cs == CS_FAILED) Small(P.red, DevError().c());
     if (d.connected) {
@@ -802,6 +862,34 @@ void PageDevice() {
         "The safest mode: synchronous with small packets. Slowest, but works when everything else fails." };
     Wrapped(P.text2, g_en ? descEn[g_set.algo] : descFr[g_set.algo]);
     Small(P.text3, T("S'applique uniquement au mode FPGA.", "Only applies to FPGA mode."), false);
+    AlgoState as = AlgoCopy();
+    if (as.running) {
+        ImGui::Text("%s  %d / 4 · %s", T("Comparaison…", "Comparing…"), as.current, algos[as.current]);
+        Progress((as.current - 1) / 4.f, Avail(), P.accent);
+        if (Button(T("Arrêter", "Stop"), B_DANGER)) BenchStop();
+    } else if (Button(T("Comparer les 4 algorithmes (~40 s)", "Compare the 4 algorithms (~40 s)"), B_NEUTRAL, ImVec2(0, 0), busy || g_set.mode != MODE_FPGA)) AlgoStart();
+    if (as.done && ImGui::BeginTable("##al", 5, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingStretchProp)) {
+        ImGui::TableNextRow(ImGuiTableRowFlags_Headers);
+        const char* hd[5] = { T("Algorithme", "Algorithm"), T("Latence", "Latency"), T("Séq. 8 Mo", "Seq. 8 MB"), "Scatter 256", T("Succès", "Success") };
+        for (int c = 0; c < 5; c++) { ImGui::TableSetColumnIndex(c); ImGui::TextColored(P.text2, "%s", hd[c]); }
+        for (int a = 1; a <= 4; a++) {
+            const AlgoRes& r = as.r[a];
+            ImVec4 c = a == as.best ? P.green : P.text;
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn(); ImGui::TextColored(c, "%s", algos[a]);
+            if (!r.ran) { ImGui::TableNextColumn(); ImGui::TextColored(P.red, "%s", T("échec", "failed")); continue; }
+            ImGui::TableNextColumn(); ImGui::TextColored(c, "%s µs", Num(r.lat, 1).c_str());
+            ImGui::TableNextColumn(); ImGui::TextColored(c, "%s", Num(r.mbps, 1).c_str());
+            ImGui::TableNextColumn(); ImGui::TextColored(c, "%s", Num(r.scMbps, 1).c_str());
+            ImGui::TableNextColumn(); ImGui::TextColored(r.success < 99.5 ? P.red : c, "%s %%", Num(r.success, 2).c_str());
+        }
+        ImGui::EndTable();
+        if (as.best != g_set.algo && Button(Fmt(T("Utiliser %s", "Use %s"), algos[as.best]).c_str(), B_PRIMARY, ImVec2(0, 0), busy)) {
+            g_set.algo = as.best;
+            SaveSettings();
+            StartJob([] { DevDisconnect(); });
+        }
+    }
     EndCard();
     ImGui::Dummy(ImVec2(0, 4 * S));
 
@@ -822,7 +910,7 @@ void PageDevice() {
     ImGui::BeginGroup();
     BeginCard("##info");
     Section(T("Informations", "Information"));
-    if (!d.connected) {
+    if (!d.connected && !d.released) {
         ImGui::TextColored(P.text3, "%s", T("Aucune carte ouverte", "No card opened"));
     } else {
         KV(T("Modèle FPGA", "FPGA model"), d.fpga.c());
@@ -928,7 +1016,20 @@ void PageFirmware() {
     }
     ImGui::Dummy(ImVec2(0, 4 * S));
     // Actions
+    if (!g_set.fwFile.empty()) {
+        static std::wstring idFor;
+        static uint32_t fid = 0;
+        if (idFor != g_set.fwFile) { idFor = g_set.fwFile; fid = FirmwareIdcode(idFor); }
+        const FpgaModel* m = fid ? ModelById(fid) : nullptr;
+        if (m) Small(_stricmp(m->name, g_set.fwModel) == 0 ? P.green : P.red, Fmt(T("Fichier prévu pour : %s", "File made for: %s"), m->name).c_str(), false);
+        else Small(P.orange, T("Modèle visé par ce fichier inconnu : vérifiez qu'il est bien fait pour votre carte.", "Target model of this file unknown: make sure it is made for your card."));
+    }
     bool bit = g_set.fwType == 0;
+    if (!bit) {
+        if (Switch(T("Sauvegarder la flash avant d'écrire ou d'effacer", "Back up the flash before writing or erasing"), &g_set.fwBackup)) SaveSettings();
+        Help(T("Lit le firmware actuel de la carte dans un fichier avant d'écrire le nouveau. Pour revenir en arrière, flashez ce fichier. Si la sauvegarde échoue, rien n'est écrit.",
+               "Reads the card's current firmware to a file before writing the new one. To go back, flash that file. If the backup fails, nothing is written."));
+    }
     const char* main = bit ? T("Charger en RAM (BIT)", "Load into RAM (BIT)") : T("Flasher le firmware (BIN → flash)", "Flash firmware (BIN → flash)");
     if (Button(main, B_PRIMARY, ImVec2(0, 36 * S), f.running)) {
         std::string ext = Lower(W2U(g_set.fwFile));
@@ -957,6 +1058,9 @@ void PageFirmware() {
         }
         Help(T("Compare le fichier .bin choisi au contenu de la flash, sans rien écrire. Indique si ce firmware est bien celui installé sur la carte.",
                "Compares the chosen .bin file with the flash contents, without writing anything. Tells whether this firmware is the one installed on the card."));
+        ImGui::SameLine();
+        if (Button(T("Sauvegarder", "Back up"), B_NEUTRAL, ImVec2(0, 36 * S), f.running)) FwStart(FW_BACKUP);
+        Help(T("Lit toute la flash de la carte dans un fichier .bin, sans rien écrire. Le FPGA redémarre à la fin.", "Reads the card's whole flash to a .bin file, without writing anything. The FPGA restarts at the end."));
         ImGui::SameLine();
         if (Button(T("Effacer la flash", "Erase flash"), B_DANGER, ImVec2(0, 36 * S), f.running)) {
             std::wstring q1 = U2W(Fmt(T("Effacer entièrement la flash du FPGA %s ?\n\nLa carte n'aura plus de firmware et ne fonctionnera plus jusqu'au prochain flashage.",
@@ -1169,7 +1273,7 @@ void PageSettings() {
     Help(T("Adresse physique où commencent les lectures dans la RAM du PC cible. 0x10000000 (256 Mo) évite les zones réservées du début de la mémoire.",
            "Physical address where reads start in the target PC's RAM. 0x10000000 (256 MB) avoids the reserved areas at the start of memory."));
     ImGui::SetNextItemWidth(Avail());
-    ImGui::InputText("##base", g_set.base, sizeof g_set.base, ImGuiInputTextFlags_CharsHexadecimal | ImGuiInputTextFlags_CharsUppercase);
+    ImGui::InputText("##base", g_set.base, sizeof g_set.base);
     if (ImGui::IsItemDeactivatedAfterEdit()) SaveSettings();
     u64 bv;
     if (!ParseHex(g_set.base, &bv)) Small(P.red, T("Adresse de base invalide (ex. 0x10000000).", "Invalid base address (e.g. 0x10000000)."), false);
@@ -1241,6 +1345,8 @@ void PageSettings() {
     ImGui::PopFont();
     ImGui::TextColored(P.text2, "%s", Fmt(T("Version %s · Benchmark DMA basé sur LeechCore", "Version %s · DMA benchmark based on LeechCore"), APP_VERSION).c_str());
     ImGui::TextColored(P.text2, "%s %s %s", T("Développé par", "Developed by"), APP_AUTHOR, T("sur Discord", "on Discord"));
+    if (Switch(T("Chercher les mises à jour au démarrage", "Check for updates at startup"), &g_set.updates)) SaveSettings();
+    Help(T("Interroge la page GitHub du projet. Aucune donnée n'est envoyée.", "Queries the project's GitHub page. No data is sent."));
     Small(P.text3, Fmt(T("Réglages et historique : %s", "Settings and history: %s"), W2U(DataDir()).c_str()).c_str());
     if (Button(T("Ouvrir le dossier", "Open folder"), B_GHOST)) ShellExecuteW(nullptr, L"open", DataDir().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
     Small(P.text3, T("Composants tiers : LeechCore (GPL-3), OpenOCD (GPL-2), bitstreams bscan_spi, pilotes FTDI et WCH. Voir LICENCES-TIERCES.txt.",

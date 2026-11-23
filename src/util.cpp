@@ -296,6 +296,9 @@ void LoadSettings() {
     s.testMode = std::clamp(IniInt(L"test", L"mode", s.testMode), 0, 4);
     s.stabMin = std::clamp(IniInt(L"test", L"stabilite_min", s.stabMin), 1, 600);
     s.zoneAuto = IniInt(L"test", L"zone_auto", s.zoneAuto) != 0;
+    s.release = IniInt(L"connexion", L"liberer", s.release) != 0;
+    s.updates = IniInt(L"apparence", L"maj", s.updates) != 0;
+    s.fwBackup = IniInt(L"firmware", L"sauvegarde", s.fwBackup) != 0;
     for (int i = 0; i < 8; i++)
         s.tests[i] = IniInt(L"tests", U2W(std::string("t_") + TEST_KEYS[i]).c_str(), s.tests[i]) != 0;
     s.dark = IniInt(L"apparence", L"sombre", s.dark) != 0;
@@ -331,6 +334,9 @@ void SaveSettings() {
     puti(L"test", L"mode", s.testMode);
     puti(L"test", L"stabilite_min", s.stabMin);
     puti(L"test", L"zone_auto", s.zoneAuto);
+    puti(L"connexion", L"liberer", s.release);
+    puti(L"apparence", L"maj", s.updates);
+    puti(L"firmware", L"sauvegarde", s.fwBackup);
     for (int i = 0; i < 8; i++) puti(L"tests", U2W(std::string("t_") + TEST_KEYS[i]).c_str(), s.tests[i]);
     puti(L"apparence", L"sombre", s.dark);
     puti(L"apparence", L"anglais", s.english);

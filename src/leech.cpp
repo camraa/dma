@@ -116,9 +116,13 @@ std::wstring ResolveDll() {
     return g_set.dll;
 }
 
+std::atomic<int> g_algoOverride{ 0 };
+
 std::string DevDeviceString() {
     if (g_set.mode == MODE_CUSTOM) return g_set.custom;
-    return g_set.algo ? Fmt("fpga://algo=%d", g_set.algo) : std::string("fpga");
+    // Réglage : 0 = auto, 1..4 ; LeechCore : 0 async normal, 1 async tiny, 2 old normal, 3 old tiny
+    int algo = g_algoOverride ? g_algoOverride.load() : g_set.algo;
+    return algo ? Fmt("fpga://algo=%d", algo - 1) : std::string("fpga");
 }
 
 static bool LoadLc(const std::wstring& path, Tx& err) {
@@ -416,7 +420,7 @@ bool DevConnect(bool veryVerbose) {
     if (d.usbLink.fr.empty()) d.usbLink = Tx{ "USB ?", "USB ?" };
 
     { std::lock_guard<std::mutex> l(g_devMx); g_dev = d; g_devErr = {}; }
-    if (g_set.zoneAuto) {
+    if (g_set.zoneAuto && g_algoOverride <= 1) {   // la comparaison garde la première cartographie
         ProbeRam(d);
         std::lock_guard<std::mutex> l(g_devMx);
         g_dev = d;
@@ -449,6 +453,55 @@ void DevDisconnect() {
     if (was) Log(L_INFO, "%s", T("Déconnecté.", "Disconnected."));
 }
 
+// Rend la carte aux autres logiciels en gardant les informations affichées
+void DevRelease() {
+    if (!g_set.release || !g_h) return;
+    LC.MemFree(g_scatter);
+    LC.Close(g_h);
+    g_h = nullptr;
+    g_scatter = nullptr;
+    std::lock_guard<std::mutex> l(g_devMx);
+    g_dev.connected = false;
+    g_dev.released = true;
+    g_connState = CS_RELEASED;
+}
+
+static bool CardPresent() {
+    for (auto& u : FindFt60x(false)) if (!u.problem) return true;
+    return false;
+}
+
+// Surveille le branchement USB de la carte : débranchée, on ferme ; rebranchée, on reconnecte
+void DevMonitorStart() {
+    std::thread([] {
+        bool was = CardPresent();
+        for (;;) {
+            Sleep(1500);
+            bool now = CardPresent();
+            if (g_set.mode != MODE_FPGA) { was = now; continue; }
+            if (was && !now) {
+                extern void BenchStop();
+                Log(L_WARN, "%s", T("Carte débranchée.", "Card unplugged."));
+                Toast(T("Carte débranchée.", "Card unplugged."), true);
+                BenchStop();
+                for (int i = 0; i < 200 && JobRunning(); i++) Sleep(50);
+                StartJob([] {
+                    DevDisconnect();
+                    std::lock_guard<std::mutex> l(g_devMx);
+                    g_devErr = TX("Carte débranchée.", "Card unplugged.");
+                    g_connState = CS_FAILED;
+                });
+            } else if (!was && now) {
+                Log(L_INFO, "%s", T("Carte branchée : reconnexion…", "Card plugged in: reconnecting…"));
+                Sleep(2000);                 // laisse Windows activer le pilote
+                for (int i = 0; i < 200 && JobRunning(); i++) Sleep(50);
+                ConnectAsync(false);
+            }
+            was = now;
+        }
+    }).detach();
+}
+
 void ConnectAsync(bool diagOnFail) {
     extern void DiagStart();
     StartJob([diagOnFail] {
@@ -456,6 +509,7 @@ void ConnectAsync(bool diagOnFail) {
         bool ok = DevConnect(false);
         if (ok) {
             DeviceInfo d = DevInfo();
+            DevRelease();
             Toast(d.simulated ? T("Mode simulation : aucune carte réelle.", "Simulation mode: no real card.")
                               : Fmt(T("Carte connectée : %s", "Card connected: %s"), d.fpga.c()));
         } else if (diagOnFail) {

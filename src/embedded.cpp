@@ -118,6 +118,41 @@ static bool ExtractKit() {
     return true;
 }
 
+// Extrait de l'exe les fichiers dont le nom commence par prefix (sans passer par le disque de l'utilisateur)
+bool ExtractKitPrefix(const std::wstring& prefix, const std::wstring& dir) {
+    const uint8_t* p; DWORD size;
+    if (!GetRes(RES_KIT, &p, &size) || size < 12 || memcmp(p, "CTPK", 4) != 0) return false;
+    uint32_t count = *(const uint32_t*)(p + 8);
+    struct Entry { std::wstring name; uint32_t raw, comp; };
+    std::vector<Entry> ents;
+    size_t o = 12;
+    for (uint32_t i = 0; i < count; i++) {
+        if (o + 2 > size) return false;
+        uint16_t len = *(const uint16_t*)(p + o); o += 2;
+        if (o + len * 2 + 8 > size) return false;
+        Entry e;
+        e.name.assign((const wchar_t*)(p + o), len); o += len * 2;
+        e.raw = *(const uint32_t*)(p + o); e.comp = *(const uint32_t*)(p + o + 4); o += 8;
+        ents.push_back(e);
+    }
+    DECOMPRESSOR_HANDLE dh = nullptr;
+    if (!CreateDecompressor(COMPRESS_ALGORITHM_LZMS, nullptr, &dh)) return false;
+    bool ok = true, any = false;
+    for (auto& e : ents) {
+        if (o + e.comp > size) { ok = false; break; }
+        if (e.name.rfind(prefix, 0) == 0) {
+            std::vector<uint8_t> buf(e.raw);
+            SIZE_T n = 0;
+            std::wstring name = e.name.substr(prefix.size());
+            if ((e.raw && !Decompress(dh, p + o, e.comp, buf.data(), e.raw, &n)) || !WriteFileAll(dir + L"\\" + name, buf.data(), e.raw)) { ok = false; break; }
+            any = true;
+        }
+        o += e.comp;
+    }
+    CloseDecompressor(dh);
+    return ok && any;
+}
+
 void KitEnsureAsync() {
     bool expected = false;
     if (g_kitReady || !g_kitBusy.compare_exchange_strong(expected, true)) return;

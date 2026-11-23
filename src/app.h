@@ -15,7 +15,7 @@
 #include <functional>
 
 #define APP_NAME    "Camra's Tool"
-#define APP_VERSION "1.2.0"
+#define APP_VERSION "1.3.0"
 #define APP_AUTHOR  "1sfk"
 
 typedef uint64_t u64;
@@ -96,6 +96,9 @@ struct Settings {
     int  testMode = TM_FULL;
     int  stabMin = 10;
     bool zoneAuto = true;
+    bool release = true;                     // libère la carte après chaque opération
+    bool updates = true;                     // cherche une nouvelle version au démarrage
+    bool fwBackup = true;                    // sauvegarde la flash avant de l'écrire
     bool tests[8] = { true, true, true, true, true, true, true, true };
     bool dark = true;
     bool english = false;
@@ -115,6 +118,11 @@ enum { PG_SPEED, PG_RESULTS, PG_HISTORY, PG_DEVICE, PG_FIRMWARE, PG_DIAG, PG_LOG
 extern int  g_page;
 extern HWND g_hwnd;
 
+// Mise à jour : dernière version publiée sur GitHub (vide si à jour ou inconnue)
+void UpdateCheckAsync();
+std::string UpdateAvailable();
+#define RELEASES_URL "https://github.com/camraa/dma/releases/latest"
+
 // Une seule opération sur la carte à la fois (connexion, test, diagnostic)
 bool StartJob(std::function<void()> fn);
 bool JobRunning();
@@ -125,6 +133,7 @@ bool JobRunning();
 std::wstring BuiltinLibDir();                // %LOCALAPPDATA%\CamrasTool\lib
 bool ExtractBuiltinLibs();                   // leechcore.dll, FTD3XX.dll, vcruntime140.dll
 void KitEnsureAsync();                       // OpenOCD, bitstreams, pilotes -> ...\flash
+bool ExtractKitPrefix(const std::wstring& prefix, const std::wstring& dir);
 bool KitReady();
 std::wstring KitDir();                       // %LOCALAPPDATA%\CamrasTool\flash
 
@@ -134,6 +143,7 @@ std::wstring KitDir();                       // %LOCALAPPDATA%\CamrasTool\flash
 struct Range { u64 base, size; };
 struct DeviceInfo {
     bool connected = false, simulated = false;
+    bool released = false;                   // infos connues, mais carte rendue aux autres logiciels
     std::string device;                      // chaîne LeechCore
     Tx fpga, firmware, pcie, maxMem;
     u64 fpgaId = 0, paMax = 0;
@@ -144,14 +154,17 @@ struct DeviceInfo {
     std::vector<Range> ranges;               // zones lisibles (zones protégées exclues)
     u64 excluded = 0;                        // octets exclus car illisibles en permanence
 };
-enum { CS_IDLE, CS_CONNECTING, CS_CONNECTED, CS_FAILED };
+enum { CS_IDLE, CS_CONNECTING, CS_CONNECTED, CS_FAILED, CS_RELEASED };
 extern std::atomic<int> g_connState;
 DeviceInfo DevInfo();
 Tx DevError();
 std::wstring ResolveDll();                   // réglage, sinon à côté de l'exe, sinon DLL intégrée
 std::string DevDeviceString();
+extern std::atomic<int> g_algoOverride;      // comparaison des algorithmes : 1..4, 0 = réglage
 bool DevConnect(bool veryVerbose);           // bloquant : à appeler dans un job
 void DevDisconnect();
+void DevRelease();                           // ferme la carte si « Libérer la carte » est actif
+void DevMonitorStart();                      // détecte le débranchement et le rebranchement
 bool DevOpen();
 bool DevRead(u64 pa, uint32_t cb, uint8_t* pb, double* us);
 int  DevReadScatter(int n, const u64* pas, double* us, uint8_t* copyTo = nullptr);
@@ -188,3 +201,4 @@ int  PeArch(const std::wstring& path);       // 64, 32, 0 = pas une DLL valide, 
 std::string FileVersion(const std::wstring& path);
 void InstallDriverAsync(int which);          // 0 = FTDI D3XX, 1 = WCH CH341/CH347
 bool DriverInstalling();
+int  RunDriverInstall(int which);             // processus élevé : --install-driver=N

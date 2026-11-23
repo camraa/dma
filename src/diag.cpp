@@ -349,6 +349,8 @@ static void DiagRun() {
         }
     }
 
+    DevRelease();                            // la carte redevient disponible pour les autres logiciels
+
     // Solutions dans l'ordre : ce qui bloque d'abord. Sans carte visible en USB, le branchement passe avant les pilotes.
     std::vector<Fix>& out = b.r.fixes;
     auto take = [&](std::vector<Fix>& v) { out.insert(out.end(), v.begin(), v.end()); };

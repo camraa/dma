@@ -16,6 +16,10 @@ struct TestResult {
     bool ran = false, done = false;
     double mbps = 0, callsPerSec = 0, latAvg = 0, latMin = 0, latP50 = 0, latP99 = 0, latMax = 0, success = 100;
     u64 calls = 0, errors = 0;
+    double latP999 = 0;
+    u64 spikes = 0;                          // lectures à plus de 2 fois la médiane
+    std::vector<float> hist;                 // répartition : % de lectures par tranche
+    double histMin = 0, histStep = 0;
 };
 
 // Une seconde du test de stabilité
@@ -61,10 +65,17 @@ const char* StabVerdictText(int v);
 double BestMbps(const BenchState& b, int* which = nullptr);
 double Stability(const BenchState& b, u64* failed = nullptr);
 
+// Comparaison des algorithmes FPGA
+struct AlgoRes { int algo = 0; bool ran = false, opened = false; double lat = 0, mbps = 0, scMbps = 0, success = 0, score = 0; };
+struct AlgoState { bool running = false, done = false; int current = 0, best = 0; AlgoRes r[5]; };
+AlgoState AlgoCopy();
+bool AlgoStart();
+
 // Exports
 std::string ResultsJson(const BenchState& b);
 std::string ResultsCsv(const BenchState& b);
 std::string ResultsDiscord(const BenchState& b);
+bool ResultsImage(const BenchState& b, const wchar_t* png = nullptr);   // presse-papiers, ou fichier PNG
 
 // Historique (CamrasTool_history.txt)
 struct HistEntry {

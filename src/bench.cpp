@@ -151,6 +151,15 @@ static void RunTest(int ti, Picker& pk, double dur) {
         r.latMax = lats.back();
         r.latP50 = lats[lats.size() / 2];
         r.latP99 = lats[std::min(lats.size() - 1, (size_t)(lats.size() * 0.99))];
+        r.latP999 = lats[std::min(lats.size() - 1, (size_t)(lats.size() * 0.999))];
+        for (float x : lats) if (x > 2 * r.latP50) r.spikes++;
+        // Répartition entre le minimum et le 99,5e centile ; la dernière tranche regroupe tout le reste
+        const int BINS = 40;
+        double hi = lats[std::min(lats.size() - 1, (size_t)(lats.size() * 0.995))];
+        r.histMin = r.latMin;
+        r.histStep = std::max((hi - r.latMin) / (BINS - 1), 0.1);
+        r.hist.assign(BINS, 0);
+        for (float x : lats) r.hist[(size_t)std::min((double)(BINS - 1), (x - r.histMin) / r.histStep)] += 100.f / lats.size();
         r.mbps = busy > 0 ? bytes / (busy / 1e6) / MB : 0;
         r.callsPerSec = busy > 0 ? calls / (busy / 1e6) : 0;
         r.success = units ? 100.0 * okUnits / units : 0;
@@ -290,7 +299,7 @@ bool BenchStart(int mode) {
         }
         Tx err;
         std::vector<Range> ranges = TestRanges(&err);
-        if (ranges.empty()) { Toast(err.s(), true); Log(L_ERR, "%s", err.c()); return; }
+        if (ranges.empty()) { Toast(err.s(), true); Log(L_ERR, "%s", err.c()); DevRelease(); return; }
         DeviceInfo d = DevInfo();
         Picker pk(ranges);
         bool stab = mode == TM_STABILITY;
@@ -327,6 +336,7 @@ bool BenchStart(int mode) {
                 RunTest(ti, pk, snap.duration);
             }
         }
+        DevRelease();
         BenchState fin;
         {
             std::lock_guard<std::mutex> l(g_bMx);
@@ -357,6 +367,92 @@ bool BenchStart(int mode) {
             SaveToHistory(fin);
             g_page = PG_RESULTS;
         }
+    });
+}
+
+// ---------------------------------------------------------------------------
+//  Comparaison des 4 algorithmes FPGA : mêmes adresses, mêmes durées, réglage d'origine restauré
+// ---------------------------------------------------------------------------
+static std::mutex g_aMx;
+static AlgoState g_a;
+AlgoState AlgoCopy() { std::lock_guard<std::mutex> l(g_aMx); return g_a; }
+
+static void AlgoMeasure(AlgoRes& r, const std::vector<Range>& ranges) {
+    Picker pk(ranges);
+    pk.rng.seed(42);
+    std::vector<uint8_t> buf(8u << 20);
+    std::vector<u64> pas(256);
+    u64 units = 0, okU = 0;
+    for (int k = 0; k < 3 && !g_stop; k++) {
+        double busy = 0, bytes = 0, us = 0, t0 = NowSec();
+        u64 calls = 0;
+        while (!g_stop && NowSec() - t0 < 2.0) {
+            if (k == 2) {
+                for (auto& a : pas) a = pk.Pick(0x1000);
+                int ok = DevReadScatter(256, pas.data(), &us);
+                units += 256; okU += (u64)ok; bytes += ok * 4096.0;
+            } else {
+                uint32_t n = k == 0 ? 8 : 8u << 20;
+                bool ok = DevRead(pk.Pick(n), n, buf.data(), &us);
+                units++; if (ok) { okU++; bytes += n; }
+            }
+            busy += us;
+            calls++;
+        }
+        if (!calls || busy <= 0) continue;
+        if (k == 0) r.lat = busy / calls;
+        else (k == 1 ? r.mbps : r.scMbps) = bytes / (busy / 1e6) / MB;
+    }
+    r.success = units ? 100.0 * okU / units : 0;
+    r.ran = !g_stop;
+}
+
+bool AlgoStart() {
+    if (g_set.mode != MODE_FPGA) return false;
+    if (JobRunning()) { Toast(T("Un test est en cours.", "A test is running."), true); return false; }
+    g_stop = false;
+    return StartJob([] {
+        { std::lock_guard<std::mutex> l(g_aMx); g_a = AlgoState(); g_a.running = true; }
+        std::vector<Range> ranges;
+        AlgoState s = AlgoCopy();
+        for (int a = 1; a <= 4 && !g_stop; a++) {
+            { std::lock_guard<std::mutex> l(g_aMx); g_a.current = a; }
+            g_algoOverride = a;
+            AlgoRes r;
+            r.algo = a;
+            if (DevConnect(false)) {
+                r.opened = true;
+                if (ranges.empty()) ranges = TestRanges(nullptr);
+                if (!ranges.empty()) AlgoMeasure(r, ranges);
+            }
+            s.r[a] = r;
+            std::lock_guard<std::mutex> l(g_aMx);
+            g_a.r[a] = r;
+        }
+        g_algoOverride = 0;
+        // Score : débit et réactivité rapportés au meilleur ; les erreurs éliminent
+        double bl = 1e30, bm = 0, bs = 0;
+        for (auto& r : s.r) if (r.ran && r.lat > 0) { bl = std::min(bl, r.lat); bm = std::max(bm, r.mbps); bs = std::max(bs, r.scMbps); }
+        int best = 0;
+        for (auto& r : s.r) {
+            if (!r.ran || r.lat <= 0 || bm <= 0 || bs <= 0) continue;
+            r.score = 100 * (0.4 * bl / r.lat + 0.2 * r.mbps / bm + 0.4 * r.scMbps / bs);
+            if (r.success < 99.9) r.score *= std::max(0.0, (r.success - 95) / 5) * 0.5;
+            if (!best || r.score > s.r[best].score) best = r.algo;
+        }
+        static const char* N[5] = { "Auto", "Async Normal", "Async Tiny", "Old Normal", "Old Tiny" };
+        for (auto& r : s.r)
+            if (r.ran) Log(L_INFO, T("Algorithme %-13s lat %6.1f µs · %6.1f Mo/s · scatter %6.1f Mo/s · succès %.2f %%", "Algorithm %-13s lat %6.1f µs · %6.1f MB/s · scatter %6.1f MB/s · success %.2f %%"),
+                           N[r.algo], r.lat, r.mbps, r.scMbps, r.success);
+        // Rouvre avec le réglage d'origine pour afficher les bonnes informations, puis libère la carte
+        DevConnect(false);
+        DevRelease();
+        s.running = false;
+        s.done = best > 0 && !g_stop;
+        s.best = best;
+        if (s.done) Toast(Fmt(T("Meilleur algorithme : %s", "Best algorithm: %s"), N[best]));
+        std::lock_guard<std::mutex> l(g_aMx);
+        g_a = s;
     });
 }
 

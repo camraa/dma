@@ -2,11 +2,13 @@
 #pragma once
 #include "app.h"
 
-enum { FW_DETECT, FW_PROGRAM, FW_VERIFY, FW_ERASE };
+enum { FW_DETECT, FW_PROGRAM, FW_VERIFY, FW_ERASE, FW_BACKUP };
 
 struct FpgaModel { uint32_t idcode; const char* name; };
 extern const FpgaModel FPGA_MODELS[];
 extern const int FPGA_MODEL_COUNT;
+uint32_t FirmwareIdcode(const std::wstring& file);   // IDCODE inscrit dans un .bit/.bin Xilinx, 0 si absent
+const FpgaModel* ModelById(uint32_t id);
 const FpgaModel* FindModel(const char* name);
 
 struct FwState {

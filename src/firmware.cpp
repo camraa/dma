@@ -24,9 +24,23 @@ const FpgaModel* FindModel(const char* name) {
     return nullptr;
 }
 
-static const FpgaModel* ModelById(uint32_t id) {
+const FpgaModel* ModelById(uint32_t id) {
     for (auto& m : FPGA_MODELS) if ((m.idcode & 0x0FFFFFFF) == (id & 0x0FFFFFFF)) return &m;
     return nullptr;
+}
+
+// Un firmware Xilinx série 7 / UltraScale contient le mot de synchro AA995566 puis l'écriture du
+// registre IDCODE (30018001) suivie du modèle visé.
+uint32_t FirmwareIdcode(const std::wstring& file) {
+    std::string d;
+    if (!ReadFileAll(file, d)) return 0;
+    const unsigned char sync[4] = { 0xAA, 0x99, 0x55, 0x66 }, idw[4] = { 0x30, 0x01, 0x80, 0x01 };
+    size_t k = d.find(std::string((const char*)sync, 4));
+    if (k == std::string::npos) return 0;
+    size_t i = d.find(std::string((const char*)idw, 4), k);
+    if (i == std::string::npos || i - k > 4096 || i + 8 > d.size()) return 0;
+    const unsigned char* p = (const unsigned char*)d.data() + i + 4;
+    return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | p[3];
 }
 
 // Script OpenOCD de la famille : (fichier cfg, tap, procédure de redémarrage)
@@ -210,6 +224,16 @@ bool FwStart(int op) {
         Toast(T("Le fichier choisi est introuvable ou illisible.", "The selected file is missing or unreadable."), true);
         return false;
     }
+    if (needFile) {
+        uint32_t fid = FirmwareIdcode(file);
+        if (fid && (fid & 0x0FFFFFFF) != (fm->idcode & 0x0FFFFFFF)) {
+            const FpgaModel* m = ModelById(fid);
+            Toast(Fmt(T("Refusé : ce fichier est prévu pour %s, pas pour %s.", "Refused: this file is made for %s, not %s."),
+                      m ? m->name : Fmt("IDCODE 0x%08X", fid).c_str(), fm->name), true);
+            return false;
+        }
+    }
+    bool backup = op == FW_BACKUP || (((op == FW_PROGRAM && g_set.fwType == 1) || op == FW_ERASE) && g_set.fwBackup);
     unsigned long hz = strtoul(g_set.fwClock, nullptr, 10);
     if (hz < 1000) hz = 10000000;
     unsigned khz = (unsigned)(hz / 1000);
@@ -230,6 +254,9 @@ bool FwStart(int op) {
         pre += Fmt("adapter driver ch347; ch347 vid_pid 0x1a86 0x%04x; adapter speed %u; ", ch.pid, khz);
         std::string f = needFile ? Tcl(StageFile(file)) : "";
         std::string proxy = Tcl(KitDir() + L"\\FPGABit\\bscan_spi_" + U2W(model) + L".bit");
+        std::wstring bakTmp = KitDir() + L"\\work\\backup.bin", bakFinal;
+        if (backup) { MakeDirs(KitDir() + L"\\work"); DeleteFileW(bakTmp.c_str()); }
+        std::string bak = backup ? Tcl(KitDir() + L"\\work") + "/backup.bin" : "";
         std::string cmd;
         if (op == FW_DETECT) cmd = pre + "init; exit";
         else if (op == FW_PROGRAM && bit)
@@ -237,18 +264,22 @@ bool FwStart(int op) {
                       pre.c_str(), cfg, f.c_str());
         else {
             std::string act;
-            if (op == FW_VERIFY) act = Fmt("if {[catch {flash verify_bank 0 {%s} 0} r]} {ct CT_FAIL $r} else {ct CT_VERIFY $r}", f.c_str());
+            if (op == FW_BACKUP) act = Fmt("if {[catch {flash read_bank 0 {%s}} r]} {ct CT_FAIL $r} else {ct CT_BACKUP $r}", bak.c_str());
+            else if (op == FW_VERIFY) act = Fmt("if {[catch {flash verify_bank 0 {%s} 0} r]} {ct CT_FAIL $r} else {ct CT_VERIFY $r}", f.c_str());
             else if (op == FW_ERASE) act = "if {[catch {flash erase_sector 0 0 last} r]} {ct CT_FAIL $r} else {ct CT_ERASED $r}";
             else act = Fmt("if {[catch {flash write_image erase {%s} 0} r]} {ct CT_FAIL $r} else {ct CT_WROTE $r; if {[catch {flash verify_bank 0 {%s} 0} r]} {ct CT_FAIL $r} else {ct CT_VERIFY $r}}",
                            f.c_str(), f.c_str());
+            // Sauvegarde d'abord : si elle échoue, rien n'est écrit
+            if (op != FW_BACKUP && backup)
+                act = Fmt("if {[catch {flash read_bank 0 {%s}} r]} {ct CT_FAIL $r} else {ct CT_BACKUP $r; %s}", bak.c_str(), act.c_str());
             cmd = Fmt("%ssource [find cpld/%s]; source [find cpld/jtagspi.cfg]; init; if {[catch {jtagspi_init 0 {%s}} r]} {ct CT_FAIL $r} else {echo CT_PROXY; %s}; if {[catch {%s %s} r]} {ct CT_NOREBOOT $r} else {echo CT_REBOOT}; exit",
                       pre.c_str(), cfg, proxy.c_str(), act.c_str(), prog, tap);
         }
-        const char* opName = op == FW_DETECT ? "detect" : op == FW_VERIFY ? "verify" : op == FW_ERASE ? "erase" : bit ? "load" : "write";
+        const char* opName = op == FW_DETECT ? "detect" : op == FW_VERIFY ? "verify" : op == FW_ERASE ? "erase" : op == FW_BACKUP ? "backup" : bit ? "load" : "write";
         Log(L_INFO, T("Firmware : %s", "Firmware: %s"), Fmt("%s · %s · %u kHz%s%s", opName, model.c_str(), khz, needFile ? " · " : "", needFile ? FileName(file).c_str() : "").c_str());
 
         uint32_t idcode = 0;
-        bool loaded = false, verified = false, erased = false, rebooted = false, noreboot = false, failed = false, tooBig = false, mismatch = false;
+        bool saved = false, loaded = false, verified = false, erased = false, rebooted = false, noreboot = false, failed = false, tooBig = false, mismatch = false;
         std::string failMsg, lastErr, all;
         auto onLine = [&](const std::string& line) {
             std::string low = Lower(line);
@@ -262,8 +293,14 @@ bool FwStart(int op) {
             if (line.find("CT_PROXY") != std::string::npos) Status(TX("Proxy SPI chargé", "SPI proxy loaded"));
             if (low.find("found flash device") != std::string::npos) {
                 Status(op == FW_VERIFY ? TX("Lecture et comparaison de la flash…", "Reading and comparing the flash…")
+                       : backup ? TX("Sauvegarde de la flash… (peut prendre plusieurs minutes)", "Backing up the flash… (may take several minutes)")
                        : op == FW_ERASE ? TX("Effacement de la flash…", "Erasing the flash…")
                                         : TX("Effacement et écriture de la flash…", "Erasing and writing the flash…"));
+            }
+            if (line.find("CT_BACKUP") != std::string::npos) {
+                saved = true;
+                if (op == FW_ERASE) Status(TX("Effacement de la flash…", "Erasing the flash…"));
+                else if (op == FW_PROGRAM) Status(TX("Effacement et écriture de la flash…", "Erasing and writing the flash…"));
             }
             if (line.find("CT_WROTE") != std::string::npos) Status(TX("Vérification de la flash…", "Verifying the flash…"));
             if (line.find("CT_VERIFY") != std::string::npos) { verified = true; Status(TX("Redémarrage du FPGA…", "Restarting the FPGA…")); }
@@ -282,7 +319,27 @@ bool FwStart(int op) {
             if (low.rfind("error", 0) == 0) lastErr = line;
         };
         DWORD code = 0;
-        bool started = RunOpenOcd(cmd, onLine, &code);
+        bool started = true, mismatchId = false;
+        // Avant toute action : le FPGA branché doit être celui choisi
+        if (op != FW_DETECT) {
+            started = RunOpenOcd(pre + "init; exit", onLine, &code);
+            mismatchId = idcode && (idcode & 0x0FFFFFFF) != (fm->idcode & 0x0FFFFFFF);
+        }
+        if (started && (op == FW_DETECT || (idcode && !mismatchId))) started = RunOpenOcd(cmd, onLine, &code);
+        // La sauvegarde est gardée même si la suite échoue
+        if (saved) {
+            WIN32_FILE_ATTRIBUTE_DATA fa;
+            saved = GetFileAttributesExW(bakTmp.c_str(), GetFileExInfoStandard, &fa) && fa.nFileSizeLow > 0;
+            if (saved) {
+                std::wstring bd = DataDir() + L"\\sauvegardes";
+                MakeDirs(bd);
+                SYSTEMTIME st;
+                GetLocalTime(&st);
+                bakFinal = bd + L"\\" + U2W(Fmt("%s_%04d%02d%02d_%02d%02d%02d.bin", model.c_str(), st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute, st.wSecond));
+                saved = MoveFileExW(bakTmp.c_str(), bakFinal.c_str(), MOVEFILE_COPY_ALLOWED) != 0;
+                if (saved) Log(L_OK, T("Firmware : sauvegarde %s", "Firmware: backup %s"), W2U(bakFinal).c_str());
+            }
+        }
 
         Tx res;
         bool ok = false;
@@ -298,6 +355,15 @@ bool FwStart(int op) {
                     SaveSettings();
                 }
             } else res = TX("Aucun FPGA détecté sur la chaîne JTAG.", "No FPGA detected on the JTAG chain.");
+        } else if (mismatchId) {
+            const FpgaModel* m = ModelById(idcode);
+            res = TX("Refusé, rien n'a été écrit : le FPGA branché est %s (IDCODE 0x%08X), pas %s.", "Refused, nothing was written: the connected FPGA is %s (IDCODE 0x%08X), not %s.",
+                     m ? m->name : "?", idcode, model.c_str());
+        } else if (!idcode) {
+            res = all.empty() ? TX("Aucun FPGA détecté sur la chaîne JTAG.", "No FPGA detected on the JTAG chain.") : Explain(all, lastErr, code);
+        } else if (op == FW_BACKUP) {
+            ok = saved && !failed;
+            res = ok ? Tx{ "Sauvegarde enregistrée : " + W2U(bakFinal), "Backup saved: " + W2U(bakFinal) } : Explain(all, failMsg.empty() ? lastErr : failMsg, code);
         } else if (op == FW_PROGRAM && bit) {
             ok = loaded && !failed;
             res = ok ? TX("Bitstream chargé en RAM : actif jusqu'à la prochaine coupure de courant.", "Bitstream loaded into RAM: active until the next power cycle.")
