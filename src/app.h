@@ -127,6 +127,7 @@ extern HWND g_hwnd;
 void UpdateCheckAsync();
 std::string UpdateAvailable();
 bool UpdateBusy();
+int UpdatePct();                              // avancement du téléchargement, -1 si inconnu
 void UpdateInstallAsync();
 void UpdateCleanup();
 bool IsNewer(const std::string& a, const std::string& b);

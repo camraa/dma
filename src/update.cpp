@@ -14,8 +14,10 @@ static const char* DL_PREFIX = "https://github.com/camraa/dma/releases/download/
 static std::mutex g_uMx;
 static std::string g_new, g_url, g_sha;
 static std::atomic<bool> g_updBusy{ false };
+static std::atomic<int> g_updPct{ -1 };
 std::string UpdateAvailable() { std::lock_guard<std::mutex> l(g_uMx); return g_new; }
 bool UpdateBusy() { return g_updBusy; }
+int UpdatePct() { return g_updPct; }
 
 static bool Parse(const std::string& s, int v[3]) { return sscanf_s(s.c_str(), "%d.%d.%d", &v[0], &v[1], &v[2]) == 3; }
 
@@ -131,7 +133,8 @@ void UpdateInstallAsync() {
     std::thread([url, sha] {
         auto fail = [](const char* m) { Log(L_ERR, "%s", m); Toast(m, true); g_updBusy = false; };
         std::string exe;
-        if (!HttpGet(url, exe, 64u << 20)) return fail(T("Téléchargement de la mise à jour impossible.", "Cannot download the update."));
+        g_updPct = -1;
+        if (!HttpGet(url, exe, 64u << 20, &g_updPct)) return fail(T("Téléchargement de la mise à jour impossible.", "Cannot download the update."));
         if (Sha256(exe) != Lower(sha)) return fail(T("Mise à jour refusée : le fichier téléchargé ne correspond pas à l'empreinte publiée.", "Update refused: the downloaded file does not match the published hash."));
         std::wstring self = SelfPath(), neu = self + L".new", old = self + L".old";
         if (!WriteFileAll(neu, exe.data(), exe.size())) {

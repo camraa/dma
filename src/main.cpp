@@ -205,15 +205,6 @@ static void Sidebar(float w, float hgt) {
     else if (di.released) { col = P.green; title = T("Prête", "Ready"); sub = di.fpga.s(); }
     else { col = P.red; title = T("Carte non connectée", "Card not connected"); sub = T("Voir le diagnostic", "View diagnostics"); }
     if (b.running) sub = b.stability ? T("Test de stabilité…", "Stability test…") : T("Test en cours…", "Test running…");
-    std::string upd = UpdateAvailable();
-    if (!upd.empty()) {
-        ImGui::SetCursorPos(ImVec2(12 * S, hgt - 112 * S));
-        if (Button(Fmt(T("Version %s disponible", "Version %s available"), upd.c_str()).c_str(), B_PRIMARY, ImVec2(w - 24 * S, 32 * S), UpdateBusy() || JobRunning() || FwCopy().running)) {
-            std::wstring q = U2W(Fmt(T("Installer la version %s ?\n\nElle est téléchargée depuis GitHub et son empreinte est vérifiée, puis l'application redémarre.",
-                                       "Install version %s?\n\nIt is downloaded from GitHub and its hash is verified, then the app restarts."), upd.c_str()));
-            if (MessageBoxW(g_hwnd, q.c_str(), L"Camra's Tool", MB_YESNO | MB_ICONQUESTION) == IDYES) UpdateInstallAsync();
-        }
-    }
     float ch = 56 * S;
     ImGui::SetCursorPos(ImVec2(12 * S, hgt - ch - 14 * S));
     ImVec2 p = ImGui::GetCursorScreenPos();
@@ -231,6 +222,44 @@ static void Sidebar(float w, float hgt) {
     dl->PopClipRect();
     ImGui::PopFont();
     ImGui::EndChild();
+}
+
+// Bandeau « mise à jour disponible » en haut de toutes les pages ; renvoie sa hauteur (0 s'il n'y a rien)
+static float UpdateBanner(float x, float y, float w) {
+    static std::string later;                // version remise à plus tard, jusqu'au prochain lancement
+    std::string v = UpdateAvailable();
+    bool busy = UpdateBusy();
+    if (v.empty() || (v == later && !busy)) return 0;
+    float h = 58 * S;
+    ImGui::SetCursorPos(ImVec2(x, y));
+    ImVec2 p = ImGui::GetCursorScreenPos();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), U(WithA(P.accent, Dark ? 0.22f : 0.13f)), 12 * S);
+    dl->AddRect(p, ImVec2(p.x + w, p.y + h), U(WithA(P.accent, 0.55f)), 12 * S);
+    ImVec2 ic = ImVec2(p.x + 29 * S, p.y + h * 0.5f);
+    dl->AddCircleFilled(ic, 15 * S, U(P.accent), 32);
+    Icon(dl, 0xE896, ic, 15 * S, IM_COL32(255, 255, 255, 255));
+    bool job = JobRunning() || FwCopy().running;
+    std::string title, sub;
+    if (busy) {
+        int pc = UpdatePct();
+        title = pc < 0 ? std::string(T("Téléchargement de la mise à jour…", "Downloading the update…")) : Fmt(T("Téléchargement de la mise à jour… %d %%", "Downloading the update… %d%%"), pc);
+        sub = T("L'application va redémarrer toute seule.", "The app will restart by itself.");
+    } else {
+        title = Fmt(T("Mise à jour disponible : version %s", "Update available: version %s"), v.c_str());
+        sub = job ? T("Attendez la fin de l'opération en cours pour la télécharger.", "Wait for the current operation to finish before downloading.")
+                  : T("Veuillez la télécharger : l'application redémarre ensuite toute seule.", "Please download it: the app then restarts by itself.");
+    }
+    dl->AddText(FSemi, ImGui::GetFontSize(), ImVec2(p.x + 56 * S, p.y + 10 * S), U(P.text), title.c_str());
+    dl->AddText(FReg, (Base - 2) * S, ImVec2(p.x + 56 * S, p.y + 31 * S), U(P.text2), sub.c_str());
+    if (!busy) {
+        float bw = 124 * S, lw = 96 * S, bh = 34 * S, by = y + (h - bh) * 0.5f;
+        ImGui::SetCursorPos(ImVec2(x + w - 12 * S - bw - 6 * S - lw, by));
+        if (Button(T("Plus tard", "Later"), B_GHOST, ImVec2(lw, bh))) later = v;
+        ImGui::SetCursorPos(ImVec2(x + w - 12 * S - bw, by));
+        if (Button(T("Télécharger", "Download"), B_PRIMARY, ImVec2(bw, bh), job)) UpdateInstallAsync();
+    }
+    return h + 10 * S;
 }
 
 // ---------------------------------------------------------------------------
@@ -274,9 +303,11 @@ static void DrawUI() {
     PageHeaderButtons(g_page, segX - 12 * S);
 
     // Contenu de la page (défilant)
-    ImGui::SetCursorPos(ImVec2(sw, TitleH * S + 6 * S));
+    float top = TitleH * S + 6 * S;
+    top += UpdateBanner(cx, top, right - 16 * S - cx);   // aligné sur les cartes
+    ImGui::SetCursorPos(ImVec2(sw, top));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(26 * S, 4 * S));
-    ImGui::BeginChild("##content", ImVec2(vp->Size.x - sw, vp->Size.y - TitleH * S - 6 * S), ImGuiChildFlags_AlwaysUseWindowPadding, ImGuiWindowFlags_NoBackground);
+    ImGui::BeginChild("##content", ImVec2(vp->Size.x - sw, vp->Size.y - top), ImGuiChildFlags_AlwaysUseWindowPadding, ImGuiWindowFlags_NoBackground);
     ImGui::PopStyleVar();
     switch (g_page) {
     case PG_SPEED: PageSpeed(); break;
