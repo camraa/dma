@@ -1349,6 +1349,7 @@ void PageSettings() {
     Help(T("Interroge la page GitHub du projet. Aucune donnée n'est envoyée.", "Queries the project's GitHub page. No data is sent."));
     Small(P.text3, Fmt(T("Réglages et historique : %s", "Settings and history: %s"), W2U(DataDir()).c_str()).c_str());
     if (Button(T("Ouvrir le dossier", "Open folder"), B_GHOST)) ShellExecuteW(nullptr, L"open", DataDir().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    Small(P.text3, T("Logiciel libre sous GNU GPL version 3 · github.com/camraa/dma", "Free software under GNU GPL version 3 · github.com/camraa/dma"), false);
     Small(P.text3, T("Composants tiers : LeechCore (GPL-3), OpenOCD (GPL-2), bitstreams bscan_spi, pilotes FTDI et WCH. Voir LICENCES-TIERCES.txt.",
                      "Third-party components: LeechCore (GPL-3), OpenOCD (GPL-2), bscan_spi bitstreams, FTDI and WCH drivers. See LICENCES-TIERCES.txt."));
     EndCard();

@@ -5,7 +5,7 @@ Speedtest, diagnostic et flash de cartes DMA (FT601 / LeechCore) pour Windows 10
 ## Compiler
 Visual Studio avec le développement C++ (MSVC x64 et SDK Windows), puis :
 - `build.bat` : `out\Camra's Tool.exe`
-- `make_dist.bat` : paquet client `dist\Camras-Tool-1.3.0.zip`
+- `make_dist.bat` : paquet client `dist\Camras-Tool-1.3.1.zip`
 
 ## Organisation
 - `src/` : application (Dear ImGui + DirectX 11)

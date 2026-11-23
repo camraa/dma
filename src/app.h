@@ -15,7 +15,7 @@
 #include <functional>
 
 #define APP_NAME    "Camra's Tool"
-#define APP_VERSION "1.3.0"
+#define APP_VERSION "1.3.1"
 #define APP_AUTHOR  "1sfk"
 
 typedef uint64_t u64;

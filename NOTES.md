@@ -1,4 +1,8 @@
-## Camra's Tool 1.3.0
+## Camra's Tool 1.3.1
+
+- Licence GNU GPL version 3, incluse dans le zip.
+
+Rappel des nouveautés de la 1.3.0 :
 
 - Algorithmes FPGA : le choix dans Appareil correspondait au mauvais algorithme, corrigé.
 - Comparaison des 4 algorithmes FPGA en un clic, avec recommandation.
