@@ -25,7 +25,7 @@ bool IsNewer(const std::string& a, const std::string& b) {
     return x[0] != y[0] ? x[0] > y[0] : x[1] != y[1] ? x[1] > y[1] : x[2] > y[2];
 }
 
-static bool HttpGet(const std::string& url, std::string& out, size_t maxSize) {
+bool HttpGet(const std::string& url, std::string& out, size_t maxSize, std::atomic<int>* pct = nullptr) {
     std::wstring w = U2W(url);
     URL_COMPONENTS uc = { sizeof uc };
     wchar_t host[256], path[2048];
@@ -42,12 +42,14 @@ static bool HttpGet(const std::string& url, std::string& out, size_t maxSize) {
     if (r && WinHttpSendRequest(r, nullptr, 0, nullptr, 0, 0, 0) && WinHttpReceiveResponse(r, nullptr) &&
         WinHttpQueryHeaders(r, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, nullptr, &code, &n, nullptr) && code == 200) {
         std::vector<char> buf(65536);
-        DWORD got = 0;
+        DWORD got = 0, total = 0, tn = sizeof total;
+        WinHttpQueryHeaders(r, WINHTTP_QUERY_CONTENT_LENGTH | WINHTTP_QUERY_FLAG_NUMBER, nullptr, &total, &tn, nullptr);
         ok = true;
         for (;;) {
             if (!WinHttpReadData(r, buf.data(), (DWORD)buf.size(), &got)) { ok = false; break; }
             if (!got) break;
             out.append(buf.data(), got);
+            if (pct && total) *pct = (int)(out.size() * 100ull / total);
             if (out.size() > maxSize) { ok = false; break; }
         }
     }

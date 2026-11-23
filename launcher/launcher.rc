@@ -1,0 +1,25 @@
+#include <windows.h>
+1 ICON "..\\src\\app.ico"
+1 RT_MANIFEST "launcher.manifest"
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION 1,0,0,0
+PRODUCTVERSION 1,0,0,0
+FILEOS 0x40004
+FILETYPE 0x1
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040C04B0"
+    BEGIN
+      VALUE "CompanyName", "1sfk"
+      VALUE "FileDescription", "Camra's Tool - lanceur toujours a jour"
+      VALUE "FileVersion", "1.0.0"
+      VALUE "ProductName", "Camra's Tool"
+      VALUE "ProductVersion", "1.0.0"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x040C, 1200
+  END
+END

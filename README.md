@@ -10,6 +10,9 @@ Visual Studio avec le développement C++ (MSVC x64 et SDK Windows), puis :
 ## Tests
 `Camra's Tool.exe --test --data=DOSSIER` : tests sans carte (simulation), résultat dans `DOSSIER\tests.txt`, code de sortie = nombre d'échecs. Lancés par GitHub à chaque modification.
 
+## Lanceur
+`Camras-Tool-Lanceur.exe` installe et lance toujours la dernière version publiée (empreinte SHA-256 vérifiée, jamais de retour à une version plus ancienne). L'application, les réglages et l'historique sont dans `%LOCALAPPDATA%\CamrasTool\app`.
+
 ## Organisation
 - `src/` : application (Dear ImGui + DirectX 11)
   - `leech.cpp` LeechCore et simulation · `bench.cpp` mesures, stabilité, historique · `diag.cpp` diagnostic

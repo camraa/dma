@@ -18,6 +18,11 @@ rc /nologo /c65001 /fo obj\app.res src\app.rc || goto :err
 if not exist obj\app mkdir obj\app
 cl /nologo /MP /O2 /MT /EHsc /std:c++17 /utf-8 /W3 /DNOMINMAX /DUNICODE /D_UNICODE /DNDEBUG /Ithird_party\imgui /Ithird_party\imgui\backends /Isrc /Fo:obj\app\ /c src\*.cpp third_party\imgui\*.cpp third_party\imgui\backends\*.cpp || goto :err
 link /nologo /SUBSYSTEM:WINDOWS /MANIFEST:NO /OUT:"out\Camra's Tool.exe" obj\app\*.obj obj\app.res d3d11.lib d3dcompiler.lib dxgi.lib dwmapi.lib setupapi.lib cfgmgr32.lib cabinet.lib version.lib shell32.lib ole32.lib comdlg32.lib advapi32.lib user32.lib gdi32.lib imm32.lib || goto :err
+rem Lanceur : ouvre toujours la derniere version publiee
+if not exist obj\launcher mkdir obj\launcher
+rc /nologo /c65001 /fo obj\launcher.res launcher\launcher.rc || goto :err
+cl /nologo /O2 /MT /EHsc /std:c++17 /utf-8 /W3 /DNOMINMAX /DUNICODE /D_UNICODE /DNDEBUG /Fo:obj\launcher\ /c launcher\launcher.cpp src\update.cpp src\util.cpp || goto :err
+link /nologo /SUBSYSTEM:WINDOWS /MANIFEST:NO /OUT:"out\Camras-Tool-Lanceur.exe" obj\launcher\*.obj obj\launcher.res version.lib shell32.lib ole32.lib advapi32.lib user32.lib gdi32.lib || goto :err
 echo == OK : out\Camra's Tool.exe
 exit /b 0
 
