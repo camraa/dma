@@ -16,7 +16,7 @@
 
 #define APP_NAME    "Camra's Tool"
 #ifndef APP_VERSION
-#define APP_VERSION "1.4.0"
+#define APP_VERSION "1.4.1"
 #endif
 #define APP_AUTHOR  "1sfk"
 
