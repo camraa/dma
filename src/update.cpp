@@ -8,14 +8,17 @@
 #pragma comment(lib, "winhttp.lib")
 #pragma comment(lib, "bcrypt.lib")
 
-static const char* ASSET = "Camras-Tool.exe";
+// Fichier joint à chaque version : pas de limite de requêtes, contrairement à l'API (60 par heure et par adresse)
+static const char* VERSION_URL = "https://github.com/camraa/dma/releases/latest/download/version.json";
+static const char* API_URL = "https://api.github.com/repos/camraa/dma/releases/latest";
 static const char* DL_PREFIX = "https://github.com/camraa/dma/releases/download/";
 
 static std::mutex g_uMx;
-static std::string g_new, g_url, g_sha;
+static std::string g_new, g_url, g_sha, g_notesFr, g_notesEn;
 static std::atomic<bool> g_updBusy{ false };
 static std::atomic<int> g_updPct{ -1 };
 std::string UpdateAvailable() { std::lock_guard<std::mutex> l(g_uMx); return g_new; }
+std::string UpdateNotes() { std::lock_guard<std::mutex> l(g_uMx); return g_en ? g_notesEn : g_notesFr; }
 bool UpdateBusy() { return g_updBusy; }
 int UpdatePct() { return g_updPct; }
 
@@ -80,8 +83,34 @@ static std::string JsonStr(const std::string& b, const char* key, size_t from, s
     return e == std::string::npos ? "" : b.substr(a + 1, e - a - 1);
 }
 
-// Lit la réponse de l'API : version, adresse et empreinte de l'exe publié
-bool ParseRelease(const std::string& body, std::string& ver, std::string& url, std::string& sha) {
+// Valeur texte avec ses échappements (\\n, \\", \\\\)
+std::string JsonText(const std::string& b, const char* key) {
+    size_t k = b.find(std::string("\"") + key + "\"");
+    if (k == std::string::npos || (k = b.find(':', k)) == std::string::npos) return "";
+    k = b.find_first_not_of(" \t\r\n", k + 1);
+    if (k == std::string::npos || b[k] != '"') return "";
+    std::string s;
+    for (k++; k < b.size() && b[k] != '"'; k++) {
+        if (b[k] == '\\' && k + 1 < b.size()) { k++; s += b[k] == 'n' ? '\n' : b[k]; }
+        else s += b[k];
+    }
+    return s.substr(0, 2000);
+}
+
+// Dernière version publiée : version.json, sinon l'API (versions publiées avant la 1.4.2)
+bool FetchRelease(std::string& body) {
+    body.clear();
+#ifdef CAMRAS_TEST_FEED                       // essais : faux version.json local
+    wchar_t f[MAX_PATH];
+    if (GetEnvironmentVariableW(L"CAMRAS_FEED", f, MAX_PATH)) return ReadFileAll(f, body);
+#endif
+    if (HttpGet(VERSION_URL, body, 1 << 20) && body.find("\"tag_name\"") != std::string::npos) return true;
+    body.clear();
+    return HttpGet(API_URL, body, 1 << 20);
+}
+
+// Lit la version, l'adresse et l'empreinte du fichier publié
+bool ParseRelease(const std::string& body, std::string& ver, std::string& url, std::string& sha, const char* asset) {
     ver = JsonStr(body, "tag_name", 0, body.size());
     if (!ver.empty() && ver[0] == 'v') ver.erase(0, 1);
     int x[3];
@@ -92,7 +121,7 @@ bool ParseRelease(const std::string& body, std::string& ver, std::string& url, s
     size_t as = body.find("\"assets\"");
     size_t k = as;
     while (k != std::string::npos && (k = body.find("\"name\"", k)) != std::string::npos) {
-        if (JsonStr(body, "name", k, body.size()) == ASSET) {
+        if (JsonStr(body, "name", k, body.size()) == asset) {
             size_t next = body.find("\"name\"", k + 6);
             if (next == std::string::npos) next = body.size();
             std::string dg = JsonStr(body, "digest", k, next), u = JsonStr(body, "browser_download_url", k, next);
@@ -104,15 +133,45 @@ bool ParseRelease(const std::string& body, std::string& ver, std::string& url, s
     return true;
 }
 
+// 1 nouvelle version, 0 à jour, -1 GitHub injoignable
+static int CheckOnce() {
+    std::string body, ver, url, sha;
+    if (!FetchRelease(body) || !ParseRelease(body, ver, url, sha)) return -1;
+    if (!IsNewer(ver, APP_VERSION)) return 0;
+    std::lock_guard<std::mutex> l(g_uMx);
+    if (g_new != ver) Log(L_INFO, T("Nouvelle version disponible : %s", "New version available: %s"), ver.c_str());
+    g_new = ver; g_url = url; g_sha = sha;
+    g_notesFr = JsonText(body, "notes_fr");
+    g_notesEn = JsonText(body, "notes_en");
+    return 1;
+}
+
 void UpdateCheckAsync() {
     std::thread([] {
-        std::string body, ver, url, sha;
-        if (!HttpGet("https://api.github.com/repos/camraa/dma/releases/latest", body, 1 << 20) || !ParseRelease(body, ver, url, sha)) return;
-        if (!IsNewer(ver, APP_VERSION)) return;
-        Log(L_INFO, T("Nouvelle version disponible : %s", "New version available: %s"), ver.c_str());
-        std::lock_guard<std::mutex> l(g_uMx);
-        g_new = ver; g_url = url; g_sha = sha;
+        for (;;) {
+            if (g_set.updates && !g_updBusy) CheckOnce();
+            Sleep(2 * 3600 * 1000);
+        }
     }).detach();
+}
+
+void UpdateCheckNow() {
+    std::thread([] {
+        int r = CheckOnce();
+        if (r == 0) Toast(Fmt(T("Vous avez la dernière version (%s).", "You have the latest version (%s)."), APP_VERSION));
+        if (r < 0) Toast(T("GitHub est injoignable : vérifiez la connexion Internet.", "GitHub cannot be reached: check the Internet connection."), true);
+        if (r > 0) Toast(T("Mise à jour disponible : voir le bandeau en haut.", "Update available: see the banner at the top."));
+    }).detach();
+}
+
+int SwapExe(const std::wstring& path, const std::string& data) {
+    std::wstring neu = path + L".new", old = path + L".old";
+    if (!WriteFileAll(neu, data.data(), data.size())) { DeleteFileW(neu.c_str()); return 1; }
+    DeleteFileW(old.c_str());
+    if (FileExists(path) && !MoveFileExW(path.c_str(), old.c_str(), 0)) { DeleteFileW(neu.c_str()); return 2; }
+    if (!MoveFileExW(neu.c_str(), path.c_str(), 0)) { MoveFileExW(old.c_str(), path.c_str(), 0); return 2; }
+    DeleteFileW(old.c_str());                // reste en place si l'exe est en cours d'utilisation
+    return 0;
 }
 
 static std::wstring SelfPath() {
@@ -136,18 +195,14 @@ void UpdateInstallAsync() {
         g_updPct = -1;
         if (!HttpGet(url, exe, 64u << 20, &g_updPct)) return fail(T("Téléchargement de la mise à jour impossible.", "Cannot download the update."));
         if (Sha256(exe) != Lower(sha)) return fail(T("Mise à jour refusée : le fichier téléchargé ne correspond pas à l'empreinte publiée.", "Update refused: the downloaded file does not match the published hash."));
-        std::wstring self = SelfPath(), neu = self + L".new", old = self + L".old";
-        if (!WriteFileAll(neu, exe.data(), exe.size())) {
+        std::wstring self = SelfPath();
+        int r = SwapExe(self, exe);
+        if (r == 1) {
             fail(T("Dossier protégé : téléchargez la mise à jour depuis la page.", "Protected folder: download the update from the page."));
             OpenUrl(RELEASES_URL);
             return;
         }
-        DeleteFileW(old.c_str());
-        if (!MoveFileExW(self.c_str(), old.c_str(), 0)) { DeleteFileW(neu.c_str()); return fail(T("Remplacement de l'exe impossible.", "Cannot replace the exe.")); }
-        if (!MoveFileExW(neu.c_str(), self.c_str(), 0)) {
-            MoveFileExW(old.c_str(), self.c_str(), 0);
-            return fail(T("Remplacement de l'exe impossible.", "Cannot replace the exe."));
-        }
+        if (r) return fail(T("Remplacement de l'exe impossible.", "Cannot replace the exe."));
         ShellExecuteW(nullptr, L"open", self.c_str(), L"--after-update", nullptr, SW_SHOWNORMAL);
         PostMessageW(g_hwnd, WM_CLOSE, 0, 0);
     }).detach();

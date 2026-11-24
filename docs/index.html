@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Camra's Tool — DMA Speedtest</title>
+<meta name="description" content="Speedtest, diagnostic et flash de cartes DMA (FT601 / LeechCore) pour Windows.">
+<meta property="og:title" content="Camra's Tool — DMA Speedtest">
+<meta property="og:description" content="Speedtest, diagnostic et flash de cartes DMA. Windows 10 et 11.">
+<meta property="og:image" content="https://camraa.github.io/dma/app.png">
+<link rel="icon" href="app.ico">
+<style>
+:root { --bg:#1d1d1f; --card:#2b2b2e; --text:#f5f5f7; --dim:#b4b4bb; --line:#3d3d41; --accent:#0a84ff; }
+@media (prefers-color-scheme: light) { :root { --bg:#f2f2f7; --card:#fff; --text:#1c1c1e; --dim:#57575e; --line:#dcdce1; --accent:#0069d9; } }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--text); font:16px/1.6 "Segoe UI", system-ui, sans-serif; }
+main { max-width:920px; margin:0 auto; padding:20px 16px 56px; }
+nav { display:flex; justify-content:flex-end; gap:4px; }
+nav button { background:none; border:1px solid transparent; border-radius:8px; color:var(--dim); font:inherit; padding:4px 12px; cursor:pointer; }
+nav button[aria-pressed=true] { background:var(--card); border-color:var(--line); color:var(--text); }
+h1 { font-size:clamp(2rem, 7vw, 3rem); line-height:1.1; margin:28px 0 8px; letter-spacing:-.02em; text-wrap:balance; }
+h2 { font-size:1.25rem; margin:44px 0 12px; }
+.lead { color:var(--dim); font-size:1.1rem; max-width:58ch; margin:0 0 24px; }
+.dl { display:inline-block; background:var(--accent); color:#fff; text-decoration:none; font-weight:600; padding:13px 26px; border-radius:10px; }
+.dl:hover { filter:brightness(1.1); }
+:focus-visible { outline:3px solid var(--accent); outline-offset:3px; }
+.alt, footer { color:var(--dim); font-size:.92rem; }
+a { color:var(--accent); }
+img { width:100%; height:auto; display:block; border-radius:12px; border:1px solid var(--line); margin-top:32px; }
+figure { margin:0; } figcaption { color:var(--dim); font-size:.85rem; margin-top:8px; }
+ul, ol { padding-left:1.2em; max-width:65ch; } li { margin:6px 0; }
+.warn { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px 18px; max-width:70ch; }
+footer { border-top:1px solid var(--line); margin-top:48px; padding-top:16px; }
+html[lang=fr] [data-l=en], html[lang=en] [data-l=fr] { display:none; }
+</style>
+</head>
+<body>
+<main>
+<nav aria-label="Langue / Language"><button type="button" data-set="fr">FR</button><button type="button" data-set="en">EN</button></nav>
+
+<h1>Camra's Tool</h1>
+<p class="lead" data-l="fr">Teste, diagnostique et flashe une carte DMA (FT601 / LeechCore) depuis Windows 10 ou 11, 64 bits. Rien d'autre à installer.</p>
+<p class="lead" data-l="en">Test, diagnose and flash a DMA card (FT601 / LeechCore) from Windows 10 or 11, 64-bit. Nothing else to install.</p>
+
+<p><a class="dl" href="https://github.com/camraa/dma/releases/latest/download/Camras-Tool-Lanceur.exe"><span data-l="fr">Télécharger pour Windows</span><span data-l="en">Download for Windows</span></a></p>
+<p class="alt" data-l="fr">Le lanceur installe la dernière version, crée les raccourcis et propose chaque mise à jour.<br>Sans lanceur : <a href="https://github.com/camraa/dma/releases/latest/download/Camras-Tool.exe">l'application seule</a> · <a href="https://github.com/camraa/dma/releases">toutes les versions et leurs nouveautés</a></p>
+<p class="alt" data-l="en">The launcher installs the latest version, creates the shortcuts and offers each update.<br>Without the launcher: <a href="https://github.com/camraa/dma/releases/latest/download/Camras-Tool.exe">the app alone</a> · <a href="https://github.com/camraa/dma/releases">all versions and release notes</a></p>
+
+<figure><img src="app.png" width="1240" height="820" alt="Camra's Tool : page Speedtest"><figcaption><span data-l="fr">Capture en mode simulation.</span><span data-l="en">Screenshot in simulation mode.</span></figcaption></figure>
+
+<h2 data-l="fr">Ce que fait l'application</h2><h2 data-l="en">What the app does</h2>
+<ul data-l="fr"><li>Mesure la latence, le débit et la stabilité, et explique ce qui limite la vitesse.</li><li>Trouve pourquoi une carte n'est pas détectée et installe les pilotes manquants.</li><li>Compare les câbles, les ports USB et les algorithmes FPGA.</li><li>Garde l'historique de vos résultats, à partager en image ou sur Discord.</li></ul>
+<ul data-l="en"><li>Measures latency, throughput and stability, and explains what limits the speed.</li><li>Finds why a card is not detected and installs missing drivers.</li><li>Compares cables, USB ports and FPGA algorithms.</li><li>Keeps a history of your results, to share as an image or on Discord.</li></ul>
+
+<h2 data-l="fr">Installation</h2><h2 data-l="en">Installation</h2>
+<ol data-l="fr"><li>Branchez la carte DMA en USB 3 sur ce PC. Le PC cible doit être allumé.</li><li>Fermez les autres logiciels DMA.</li><li>Ouvrez le fichier téléchargé : l'application se connecte et vous guide.</li></ol>
+<ol data-l="en"><li>Plug the DMA card into a USB 3 port of this PC. The target PC must be on.</li><li>Close other DMA software.</li><li>Open the downloaded file: the app connects and guides you.</li></ol>
+
+<h2 data-l="fr">À savoir</h2><h2 data-l="en">Good to know</h2>
+<div class="warn" data-l="fr">L'exe n'est pas signé numériquement : Windows peut afficher un avertissement SmartScreen. Ne téléchargez que depuis cette page ou depuis GitHub. Le flash du firmware n'a pas encore été validé sur une carte réelle.</div>
+<div class="warn" data-l="en">The exe is not code-signed: Windows may show a SmartScreen warning. Download only from this page or from GitHub. Firmware flashing has not been validated on a real card yet.</div>
+
+<footer><span data-l="fr">Développé par 1sfk sur Discord · logiciel libre sous GNU GPL 3 · </span><span data-l="en">Developed by 1sfk on Discord · free software under GNU GPL 3 · </span><a href="https://github.com/camraa/dma"><span data-l="fr">code source</span><span data-l="en">source code</span></a></footer>
+</main>
+<script>
+function lang(l) {
+  document.documentElement.lang = l;
+  document.querySelectorAll('nav button').forEach(b => b.setAttribute('aria-pressed', b.dataset.set === l));
+}
+document.querySelectorAll('nav button').forEach(b => b.addEventListener('click', () => lang(b.dataset.set)));
+lang((navigator.language || 'fr').toLowerCase().startsWith('fr') ? 'fr' : 'en');
+</script>
+</body>
+</html>

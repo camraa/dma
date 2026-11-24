@@ -16,7 +16,7 @@
 
 #define APP_NAME    "Camra's Tool"
 #ifndef APP_VERSION
-#define APP_VERSION "1.4.1"
+#define APP_VERSION "1.4.2"
 #endif
 #define APP_AUTHOR  "1sfk"
 
@@ -124,14 +124,21 @@ extern int  g_page;
 extern HWND g_hwnd;
 
 // Mise à jour : dernière version publiée sur GitHub (vide si à jour ou inconnue)
-void UpdateCheckAsync();
+void UpdateCheckAsync();                     // au démarrage, puis toutes les 2 heures
+void UpdateCheckNow();                       // bouton des Réglages
+std::string UpdateNotes();                   // nouveautés de la version disponible
 std::string UpdateAvailable();
 bool UpdateBusy();
 int UpdatePct();                              // avancement du téléchargement, -1 si inconnu
 void UpdateInstallAsync();
 void UpdateCleanup();
 bool IsNewer(const std::string& a, const std::string& b);
-bool ParseRelease(const std::string& body, std::string& ver, std::string& url, std::string& sha);
+#define APP_ASSET      "Camras-Tool.exe"
+#define LAUNCHER_ASSET "Camras-Tool-Lanceur.exe"
+bool ParseRelease(const std::string& body, std::string& ver, std::string& url, std::string& sha, const char* asset = APP_ASSET);
+bool FetchRelease(std::string& body);
+std::string JsonText(const std::string& b, const char* key);
+int SwapExe(const std::wstring& path, const std::string& data);   // 0 ok, 1 écriture impossible, 2 remplacement impossible
 std::string Sha256(const std::string& d);
 
 // Support : plantage, signalement, tests

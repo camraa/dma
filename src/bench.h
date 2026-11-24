@@ -55,6 +55,7 @@ BenchState BenchCopy();
 std::vector<int> TestsForMode(int mode);
 bool BenchStart(int mode, const std::string& note = "", bool stay = false);   // stay : ne change pas de page
 Tx Bottleneck(double best, int usbSpeed, const std::string& pcie);             // ce qui limite le débit
+Tx CardReference(const std::string& fpga, double best, double lat, int usbSpeed, const std::string& pcie, int* lvl);   // 0 normal, 1 plus faible, 2 pas de référence
 double StabDrift(const std::vector<StabSample>& s);                            // baisse lente en %, 0 si trop court
 void BenchStop();
 

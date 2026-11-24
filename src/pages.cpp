@@ -557,6 +557,16 @@ void PageResults() {
         ImGui::Dummy(ImVec2(0, 2 * S));
     }
 
+    // Référence : cartes du même modèle déjà mesurées
+    {
+        int lvl = 0;
+        Tx ref = CardReference(b.fpga.fr, best, L.ran && L.calls ? L.latAvg : 0, b.usbSpeed, b.pcieLink, &lvl);
+        if (!b.simulated && !ref.fr.empty()) {
+            Wrapped(lvl == 0 ? P.green : lvl == 1 ? P.orange : P.text3, ref.c());
+            ImGui::Dummy(ImVec2(0, 2 * S));
+        }
+    }
+
     // Repère : meilleurs résultats déjà obtenus avec cette carte sur ce PC
     {
         double refM = 0, refL = 0;
@@ -1373,8 +1383,9 @@ void PageSettings() {
     ImGui::PopFont();
     ImGui::TextColored(P.text2, "%s", Fmt(T("Version %s · Benchmark DMA basé sur LeechCore", "Version %s · DMA benchmark based on LeechCore"), APP_VERSION).c_str());
     ImGui::TextColored(P.text2, "%s %s %s", T("Développé par", "Developed by"), APP_AUTHOR, T("sur Discord", "on Discord"));
-    if (Switch(T("Chercher les mises à jour au démarrage", "Check for updates at startup"), &g_set.updates)) SaveSettings();
-    Help(T("Interroge la page GitHub du projet. Aucune donnée n'est envoyée.", "Queries the project's GitHub page. No data is sent."));
+    if (Switch(T("Chercher les mises à jour", "Check for updates"), &g_set.updates)) SaveSettings();
+    Help(T("Au démarrage puis toutes les 2 heures : interroge la page GitHub du projet. Aucune donnée n'est envoyée.", "At startup then every 2 hours: queries the project's GitHub page. No data is sent."));
+    if (Button(T("Vérifier maintenant", "Check now"), B_NEUTRAL, ImVec2(0, 0), UpdateBusy())) UpdateCheckNow();
     Small(P.text3, Fmt(T("Réglages et historique : %s", "Settings and history: %s"), W2U(DataDir()).c_str()).c_str());
     if (Button(T("Ouvrir le dossier", "Open folder"), B_GHOST)) ShellExecuteW(nullptr, L"open", DataDir().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
     Small(P.text3, T("Logiciel libre sous GNU GPL version 3 · github.com/camraa/dma", "Free software under GNU GPL version 3 · github.com/camraa/dma"), false);

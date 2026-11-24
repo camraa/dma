@@ -226,16 +226,21 @@ static void Sidebar(float w, float hgt) {
 
 // Bandeau « mise à jour disponible » en haut de toutes les pages ; renvoie sa hauteur (0 s'il n'y a rien)
 static float UpdateBanner(float x, float y, float w) {
+    static bool openNotes = false;
     static std::string later;                // version remise à plus tard, jusqu'au prochain lancement
     std::string v = UpdateAvailable();
     bool busy = UpdateBusy();
     if (v.empty() || (v == later && !busy)) return 0;
-    float h = 58 * S;
+    std::string notes = UpdateNotes();
+    if (busy) openNotes = false;
+    float h = 58 * S, nw = w - 72 * S, nh = 0;
+    if (openNotes && !notes.empty()) nh = FReg->CalcTextSizeA((Base - 1) * S, FLT_MAX, nw, notes.c_str()).y + 12 * S;
     ImGui::SetCursorPos(ImVec2(x, y));
     ImVec2 p = ImGui::GetCursorScreenPos();
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), U(WithA(P.accent, Dark ? 0.22f : 0.13f)), 12 * S);
-    dl->AddRect(p, ImVec2(p.x + w, p.y + h), U(WithA(P.accent, 0.55f)), 12 * S);
+    dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h + nh), U(WithA(P.accent, Dark ? 0.22f : 0.13f)), 12 * S);
+    if (nh > 0) dl->AddText(FReg, (Base - 1) * S, ImVec2(p.x + 56 * S, p.y + h - 2 * S), U(P.text), notes.c_str(), nullptr, nw);
+    dl->AddRect(p, ImVec2(p.x + w, p.y + h + nh), U(WithA(P.accent, 0.55f)), 12 * S);
     ImVec2 ic = ImVec2(p.x + 29 * S, p.y + h * 0.5f);
     dl->AddCircleFilled(ic, 15 * S, U(P.accent), 32);
     Icon(dl, 0xE896, ic, 15 * S, IM_COL32(255, 255, 255, 255));
@@ -254,12 +259,17 @@ static float UpdateBanner(float x, float y, float w) {
     dl->AddText(FReg, (Base - 2) * S, ImVec2(p.x + 56 * S, p.y + 31 * S), U(P.text2), sub.c_str());
     if (!busy) {
         float bw = 124 * S, lw = 96 * S, bh = 34 * S, by = y + (h - bh) * 0.5f;
+        float gw = 108 * S;
+        if (!notes.empty()) {
+            ImGui::SetCursorPos(ImVec2(x + w - 12 * S - bw - 6 * S - lw - gw, by));
+            if (Button(openNotes ? T("Masquer", "Hide") : T("Nouveautés", "What's new"), B_GHOST, ImVec2(gw, bh))) openNotes = !openNotes;
+        }
         ImGui::SetCursorPos(ImVec2(x + w - 12 * S - bw - 6 * S - lw, by));
         if (Button(T("Plus tard", "Later"), B_GHOST, ImVec2(lw, bh))) later = v;
         ImGui::SetCursorPos(ImVec2(x + w - 12 * S - bw, by));
         if (Button(T("Télécharger", "Download"), B_PRIMARY, ImVec2(bw, bh), job)) UpdateInstallAsync();
     }
-    return h + 10 * S;
+    return h + nh + 10 * S;
 }
 
 // ---------------------------------------------------------------------------
@@ -452,7 +462,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, PWSTR, int) {
             ResultsImage(b);
         }).detach();
     DevMonitorStart();
-    if (g_set.updates) UpdateCheckAsync();
+    UpdateCheckAsync();
 
     bool done = false;
     while (!done) {

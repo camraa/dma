@@ -1,4 +1,4 @@
-﻿Camra's Tool 1.4.1 — DMA Speedtest
+﻿Camra's Tool 1.4.2 — DMA Speedtest
 Développé par 1sfk sur Discord
 ==================================
 
@@ -7,6 +7,12 @@ INSTALLATION
 Rien à installer : lancez « Camra's Tool.exe ».
 Tout est déjà dans l'exe (LeechCore, FTD3XX.dll, runtime Visual C++, OpenOCD,
 pilotes FTDI et WCH). Aucun téléchargement n'est nécessaire.
+
+Le plus simple : « Camras-Tool-Lanceur.exe », à télécharger sur
+https://github.com/camraa/dma/releases/latest
+Il installe l'application dans %LOCALAPPDATA%\CamrasTool, crée les raccourcis (Bureau et
+menu Démarrer) et propose chaque nouvelle version. Le fichier téléchargé est vérifié (SHA-256).
+Sans le lanceur, un bandeau dans l'application annonce aussi les mises à jour.
 
 Configuration requise : Windows 10 ou 11, 64 bits.
 
@@ -41,11 +47,13 @@ Code source : https://github.com/camraa/dma
 Les composants tiers gardent leur propre licence (LICENCES-TIERCES.txt).
 
 
-Camra's Tool 1.4.1 — DMA Speedtest (English)
+Camra's Tool 1.4.2 — DMA Speedtest (English)
 ============================================
 Nothing to install: run "Camra's Tool.exe" (Windows 10/11, 64-bit). Everything is built in.
 Plug the DMA card into a USB 3 port of this PC, keep the target PC on, close other DMA
 software, then start the app. Switch the language with FR / EN at the top right.
+Easiest: "Camras-Tool-Lanceur.exe" (https://github.com/camraa/dma/releases/latest) installs the
+app, creates the shortcuts and offers each new version.
 If a driver is missing, the Diagnostics tab offers an "Install the driver" button.
 If SmartScreen warns you: "More info" → "Run anyway" (the exe is not code-signed).
 License: GNU GPL version 3 (LICENCE-GPL3.txt). Source code: https://github.com/camraa/dma

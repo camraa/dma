@@ -1,23 +1,29 @@
 // launcher.cpp - lance toujours la dernière version publiée de Camra's Tool
 // À chaque démarrage : dernière version publiée sur GitHub -> si elle est plus récente, la fenêtre le dit et propose
 // de la télécharger (HTTPS + SHA-256 publié) -> lancement. Sans réseau ou en cas de problème, la version déjà installée est lancée.
-// Options : --dir=DOSSIER (installation ailleurs), --api=URL (tests), le reste est transmis à l'application.
+// Le lanceur se met à jour lui-même, garde une copie à côté de l'application et crée une seule fois les raccourcis.
+// Options : --dir=DOSSIER (installation ailleurs), --raccourcis=DOSSIER et --api=URL (tests), le reste est transmis à l'application.
 #include "../src/app.h"
 #include <shellapi.h>
 #include <commctrl.h>
+#include <shlobj.h>
 #include <thread>
 #pragma comment(lib, "comctl32.lib")
+#pragma comment(lib, "uuid.lib")
 
 bool HttpGet(const std::string& url, std::string& out, size_t maxSize, std::atomic<int>* pct);
 
 static const wchar_t* APP_EXE = L"Camra's Tool.exe";
 static std::atomic<int> g_pct{ -1 };
 static std::atomic<bool> g_downloading{ false }, g_done{ false };
-static std::wstring g_dir, g_args;
-static std::string g_api = "https://api.github.com/repos/camraa/dma/releases/latest";
+static std::wstring g_dir, g_home, g_links, g_args;
+static std::string g_api;                    // vide : dernière version publiée
 static std::atomic<int> g_answer{ 0 };       // 0 pas de question, 1 question posée, 2 télécharger, 3 plus tard
-static std::string g_newVer;
-static HWND g_wnd, g_label, g_bar, g_yes, g_no;
+static std::string g_newVer, g_newNotes;
+static HWND g_wnd, g_label, g_bar, g_yes, g_no, g_notes;
+static HFONT g_font;
+static int g_dpi = 96;
+static int Px(int v) { return MulDiv(v, g_dpi, 96); }
 static std::string g_result = "ok";          // écrit dans lanceur.txt pour le dépannage
 
 static std::string ExeVersion(const std::wstring& path) {
@@ -35,40 +41,126 @@ static bool AppRunning() {
     return m != nullptr;
 }
 
+static std::wstring SelfPath() {
+    wchar_t p[MAX_PATH * 2];
+    return std::wstring(p, GetModuleFileNameW(nullptr, p, MAX_PATH * 2));
+}
+
+static bool SelfWritable() {
+    std::wstring probe = SelfPath() + L".test";
+    HANDLE h = CreateFileW(probe.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE, nullptr);
+    if (h == INVALID_HANDLE_VALUE) return false;
+    CloseHandle(h);
+    return true;
+}
+
 static void Update() {
     std::wstring exe = g_dir + L"\\" + APP_EXE;
     bool have = FileExists(exe);
     if (AppRunning() && have) { g_result = "application deja ouverte"; return; }
-    std::string body, ver, url, sha;
-    if (!HttpGet(g_api, body, 1 << 20, nullptr) || !ParseRelease(body, ver, url, sha)) { g_result = "GitHub injoignable"; return; }
+    std::string body, ver, url, sha, lver, lurl, lsha, cur;
+    bool got = g_api.empty() ? FetchRelease(body) : HttpGet(g_api, body, 1 << 20, nullptr);
+    if (!got || !ParseRelease(body, ver, url, sha)) { g_result = "GitHub injoignable"; return; }
     if (url.empty() || sha.empty()) { g_result = "version publiee sans exe verifiable"; return; }
     sha = Lower(sha);
-    std::string cur;
-    if (have) {
-        if (ReadFileAll(exe, cur) && Sha256(cur) == sha) { g_result = "a jour " + ver; return; }
-        if (IsNewer(ExeVersion(exe), ver)) { g_result = "version installee plus recente"; return; }   // jamais de retour en arrière
-        std::string mine = ExeVersion(exe);
-        if (mine != "0.0.0" && IsNewer(ver, mine)) {     // exe abîmé de la même version : réparé sans question
-            g_newVer = ver;
-            g_answer = 1;
-            while (g_answer == 1) Sleep(30);
-            if (g_answer == 3) { g_result = "mise a jour " + ver + " remise a plus tard"; return; }
+    bool appOk = have && ReadFileAll(exe, cur) && Sha256(cur) == sha;
+    std::string mine = have ? ExeVersion(exe) : "0.0.0";
+    if (!appOk && IsNewer(mine, ver)) { g_result = "version installee plus recente"; return; }   // jamais de retour en arrière
+    bool appNew = !appOk && mine != "0.0.0" && IsNewer(ver, mine);      // sinon : première installation ou exe abîmé, sans question
+
+    // Le lanceur lui-même
+    bool selfNew = false;
+    if (IsNewer(ver, APP_VERSION) && ParseRelease(body, lver, lurl, lsha, LAUNCHER_ASSET) && !lurl.empty() && SelfWritable()) {
+        cur.clear();
+        selfNew = ReadFileAll(SelfPath(), cur) && Sha256(cur) != Lower(lsha);
+    }
+    if (appOk && !selfNew) { g_result = "a jour " + ver; return; }
+    if (appNew || selfNew) {
+        g_newVer = ver;
+        g_newNotes = JsonText(body, g_en ? "notes_en" : "notes_fr");
+        g_answer = 1;
+        while (g_answer == 1) Sleep(30);
+        if (g_answer == 3) {
+            g_result = "mise a jour " + ver + " remise a plus tard";
+            if (appOk || appNew) return;
+            selfNew = false;                 // l'application manque ou est abîmée : installée quand même
         }
     }
     g_downloading = true;
     std::string data;
-    if (!HttpGet(url, data, 64u << 20, &g_pct)) { g_result = "telechargement impossible"; return; }
-    if (Sha256(data) != sha) { g_result = "empreinte incorrecte : mise a jour refusee"; return; }
-    g_result = WriteFileAll(exe, data.data(), data.size()) ? "installe " + ver : "ecriture impossible";
+    if (!appOk) {
+        if (!HttpGet(url, data, 64u << 20, &g_pct)) { g_result = "telechargement impossible"; return; }
+        if (Sha256(data) != sha) { g_result = "empreinte incorrecte : mise a jour refusee"; return; }
+        if (SwapExe(exe, data)) { g_result = "ecriture impossible"; return; }
+        g_result = "installe " + ver;
+    } else g_result = "a jour " + ver;
+    if (selfNew) {
+        data.clear();
+        bool ok = HttpGet(lurl, data, 64u << 20, &g_pct) && Sha256(data) == Lower(lsha) && SwapExe(SelfPath(), data) == 0;
+        g_result += ok ? " + lanceur" : " (lanceur non mis a jour)";
+    }
+}
+
+static bool MakeLink(const std::wstring& dir, const std::wstring& target) {
+    std::wstring lnk = dir + L"\\Camra's Tool.lnk";
+    if (FileExists(lnk)) return true;
+    IShellLinkW* sl = nullptr;
+    if (FAILED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&sl)))) return false;
+    sl->SetPath(target.c_str());
+    sl->SetWorkingDirectory(g_home.c_str());
+    sl->SetIconLocation(target.c_str(), 0);
+    sl->SetDescription(L"Camra's Tool - DMA Speedtest");
+    IPersistFile* pf = nullptr;
+    bool ok = SUCCEEDED(sl->QueryInterface(IID_PPV_ARGS(&pf))) && SUCCEEDED(pf->Save(lnk.c_str(), TRUE));
+    if (pf) pf->Release();
+    sl->Release();
+    return ok;
+}
+
+static std::wstring Known(REFKNOWNFOLDERID id) {
+    PWSTR p = nullptr;
+    std::wstring s;
+    if (SUCCEEDED(SHGetKnownFolderPath(id, 0, nullptr, &p)) && p) s = p;
+    CoTaskMemFree(p);
+    return s;
+}
+
+// Copie du lanceur à un endroit fixe, puis raccourcis (une seule fois : s'ils sont supprimés, ils ne reviennent pas)
+static void Install() {
+    std::wstring self = SelfPath(), inst = g_home + L"\\Camras-Tool-Lanceur.exe";
+    if (_wcsicmp(self.c_str(), inst.c_str()) && (!FileExists(inst) || IsNewer(ExeVersion(self), ExeVersion(inst)))) CopyFileW(self.c_str(), inst.c_str(), FALSE);
+    std::wstring mark = g_home + L"\\raccourcis.txt";
+    if (FileExists(mark) || !FileExists(inst)) return;
+    std::wstring desk = Known(FOLDERID_Desktop), menu = Known(FOLDERID_Programs);
+    if (!g_links.empty()) { desk = g_links; menu = g_links + L"\\menu"; MakeDirs(menu); }
+    bool a = !desk.empty() && MakeLink(desk, inst), b = !menu.empty() && MakeLink(menu, inst);
+    std::string s = Fmt("bureau %d, menu %d\r\n", a ? 1 : 0, b ? 1 : 0);
+    WriteFileAll(mark, s.data(), s.size());
 }
 
 // Affiche la question (bandeau + boutons) ou revient à la barre de progression
 static void ShowQuestion(bool on) {
+    std::wstring notes = U2W(g_newNotes);
+    for (size_t k = 0; (k = notes.find(L'\n', k)) != std::wstring::npos; k += 2) notes.replace(k, 1, L"\r\n");
+    int nh = 0;
+    if (on && !notes.empty()) {
+        RECT rc = { 0, 0, Px(325), 0 };
+        HDC dc = GetDC(g_wnd);
+        HGDIOBJ old = SelectObject(dc, g_font);
+        DrawTextW(dc, notes.c_str(), -1, &rc, DT_CALCRECT | DT_WORDBREAK | DT_NOPREFIX);
+        SelectObject(dc, old);
+        ReleaseDC(g_wnd, dc);
+        nh = std::min((int)rc.bottom, Px(260)) + Px(8);
+        SetWindowTextW(g_notes, notes.c_str());
+        SetWindowPos(g_notes, nullptr, Px(20), Px(64), Px(325), nh, SWP_NOZORDER);
+    }
+    SetWindowPos(g_yes, nullptr, Px(115), Px(70) + nh, 0, 0, SWP_NOZORDER | SWP_NOSIZE);
+    SetWindowPos(g_no, nullptr, Px(245), Px(70) + nh, 0, 0, SWP_NOZORDER | SWP_NOSIZE);
+    SetWindowPos(g_wnd, nullptr, 0, 0, Px(380), Px(150) + nh, SWP_NOZORDER | SWP_NOMOVE | SWP_NOACTIVATE);
     if (on) SetWindowTextW(g_label, U2W(Fmt(T("Mise à jour disponible : version %s\nVeuillez la télécharger.", "Update available: version %s\nPlease download it."), g_newVer.c_str())).c_str());
     else SetWindowTextW(g_label, U2W(T("Téléchargement de la mise à jour…", "Downloading the update…")).c_str());
     ShowWindow(g_bar, on ? SW_HIDE : SW_SHOW);
-    ShowWindow(g_yes, on ? SW_SHOW : SW_HIDE);
-    ShowWindow(g_no, on ? SW_SHOW : SW_HIDE);
+    for (HWND h : { g_yes, g_no, g_notes }) ShowWindow(h, on ? SW_SHOW : SW_HIDE);
     if (on) { ShowWindow(g_wnd, SW_SHOW); SetForegroundWindow(g_wnd); SetFocus(g_yes); }
 }
 
@@ -107,17 +199,22 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, PWSTR, int) {
     HANDLE mtx = CreateMutexW(nullptr, TRUE, L"CamrasTool_Launcher");
     if (GetLastError() == ERROR_ALREADY_EXISTS) return 0;
     g_en = PRIMARYLANGID(GetUserDefaultUILanguage()) != LANG_FRENCH;
-    g_dir = LocalDir() + L"\\app";
+    g_home = LocalDir();
+    g_dir = g_home + L"\\app";
+    bool ownDir = false;
     int n = 0;
     LPWSTR* av = CommandLineToArgvW(GetCommandLineW(), &n);
     for (int i = 1; av && i < n; i++) {
         std::wstring a = av[i];
-        if (a.rfind(L"--dir=", 0) == 0) g_dir = a.substr(6);
+        if (a.rfind(L"--dir=", 0) == 0) { g_home = g_dir = a.substr(6); ownDir = true; }
         else if (a.rfind(L"--api=", 0) == 0) g_api = W2U(a.substr(6));
+        else if (a.rfind(L"--raccourcis=", 0) == 0) g_links = a.substr(13);
         else g_args += L" \"" + a + L"\"";
     }
     LocalFree(av);
     MakeDirs(g_dir);
+    DeleteFileW((SelfPath() + L".old").c_str());      // ancien lanceur, après une mise à jour
+    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     // Première fois : reprend les réglages et l'historique posés à côté du lanceur
     for (const wchar_t* f : { L"\\CamrasTool.ini", L"\\CamrasTool_history.txt" })
         if (!FileExists(g_dir + f) && FileExists(ExeDir() + f)) CopyFileW((ExeDir() + f).c_str(), (g_dir + f).c_str(), TRUE);
@@ -126,21 +223,21 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, PWSTR, int) {
     InitCommonControlsEx(&ic);
     SetProcessDPIAware();
     HDC dc = GetDC(nullptr);
-    int dpi = GetDeviceCaps(dc, LOGPIXELSX);
+    g_dpi = GetDeviceCaps(dc, LOGPIXELSX);
     ReleaseDC(nullptr, dc);
-    auto px = [dpi](int v) { return MulDiv(v, dpi, 96); };
     WNDCLASSEXW wc = { sizeof wc, 0, Proc, 0, 0, hi, LoadIconW(hi, MAKEINTRESOURCEW(1)), LoadCursorW(nullptr, IDC_ARROW), GetSysColorBrush(COLOR_WINDOW), nullptr, L"CamrasLauncher", LoadIconW(hi, MAKEINTRESOURCEW(1)) };
     RegisterClassExW(&wc);
-    int W = px(380), H = px(150);
+    int W = Px(380), H = Px(150);
     g_wnd = CreateWindowExW(0, wc.lpszClassName, L"Camra's Tool", WS_CAPTION | WS_POPUP, (GetSystemMetrics(SM_CXSCREEN) - W) / 2, (GetSystemMetrics(SM_CYSCREEN) - H) / 2, W, H, nullptr, nullptr, hi, nullptr);
     SetWindowLongPtrW(g_wnd, GWLP_USERDATA, (LONG_PTR)GetTickCount64());
-    HFONT font = CreateFontW(-px(14), 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
-    g_label = CreateWindowExW(0, L"STATIC", U2W(T("Recherche de la dernière version…", "Checking for the latest version…")).c_str(), WS_CHILD | WS_VISIBLE, px(20), px(14), px(330), px(44), g_wnd, nullptr, hi, nullptr);
+    HFONT font = g_font = CreateFontW(-Px(14), 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
+    g_label = CreateWindowExW(0, L"STATIC", U2W(T("Recherche de la dernière version…", "Checking for the latest version…")).c_str(), WS_CHILD | WS_VISIBLE, Px(20), Px(14), Px(330), Px(44), g_wnd, nullptr, hi, nullptr);
     SendMessageW(g_label, WM_SETFONT, (WPARAM)font, TRUE);
-    g_bar = CreateWindowExW(0, PROGRESS_CLASSW, nullptr, WS_CHILD | WS_VISIBLE | PBS_MARQUEE, px(20), px(44), px(325), px(14), g_wnd, nullptr, hi, nullptr);
-    g_yes = CreateWindowExW(0, L"BUTTON", U2W(T("Télécharger", "Download")).c_str(), WS_CHILD | WS_TABSTOP | BS_DEFPUSHBUTTON, px(115), px(70), px(120), px(30), g_wnd, (HMENU)IDOK, hi, nullptr);
-    g_no = CreateWindowExW(0, L"BUTTON", U2W(T("Plus tard", "Later")).c_str(), WS_CHILD | WS_TABSTOP, px(245), px(70), px(100), px(30), g_wnd, (HMENU)IDCANCEL, hi, nullptr);
-    for (HWND b : { g_yes, g_no }) SendMessageW(b, WM_SETFONT, (WPARAM)font, TRUE);
+    g_bar = CreateWindowExW(0, PROGRESS_CLASSW, nullptr, WS_CHILD | WS_VISIBLE | PBS_MARQUEE, Px(20), Px(44), Px(325), Px(14), g_wnd, nullptr, hi, nullptr);
+    g_yes = CreateWindowExW(0, L"BUTTON", U2W(T("Télécharger", "Download")).c_str(), WS_CHILD | WS_TABSTOP | BS_DEFPUSHBUTTON, Px(115), Px(70), Px(120), Px(30), g_wnd, (HMENU)IDOK, hi, nullptr);
+    g_no = CreateWindowExW(0, L"BUTTON", U2W(T("Plus tard", "Later")).c_str(), WS_CHILD | WS_TABSTOP, Px(245), Px(70), Px(100), Px(30), g_wnd, (HMENU)IDCANCEL, hi, nullptr);
+    g_notes = CreateWindowExW(0, L"STATIC", L"", WS_CHILD | SS_NOPREFIX, Px(20), Px(64), Px(325), Px(20), g_wnd, nullptr, hi, nullptr);
+    for (HWND b : { g_yes, g_no, g_notes }) SendMessageW(b, WM_SETFONT, (WPARAM)font, TRUE);
     SendMessageW(g_bar, PBM_SETMARQUEE, TRUE, 30);
     SetTimer(g_wnd, 1, 60, nullptr);
 
@@ -160,6 +257,7 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, PWSTR, int) {
     if (g_result.rfind("empreinte", 0) == 0)
         MessageBoxW(nullptr, U2W(T("La mise à jour téléchargée ne correspond pas à l'empreinte publiée : elle a été refusée. La version installée va s'ouvrir.",
                                    "The downloaded update does not match the published hash: it was refused. The installed version will open.")).c_str(), L"Camra's Tool", MB_ICONWARNING);
+    if (!ownDir || !g_links.empty()) Install();
     ShellExecuteW(nullptr, L"open", exe.c_str(), g_args.c_str(), g_dir.c_str(), SW_SHOWNORMAL);
     if (mtx) CloseHandle(mtx);
     return 0;

@@ -116,7 +116,7 @@ std::wstring DataDir() {
         std::wstring cmd = GetCommandLineW();
         size_t k = cmd.find(L"--data=");
         if (k != std::wstring::npos) {
-            size_t e = cmd.find(L' ', k);
+            size_t e = cmd.find(k && cmd[k - 1] == L'"' ? L'"' : L' ', k);
             dir = cmd.substr(k + 7, e == std::wstring::npos ? e : e - k - 7);
             MakeDirs(dir);
         }

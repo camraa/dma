@@ -529,6 +529,29 @@ Tx Bottleneck(double best, int usb, const std::string& pcie) {
               pcie.empty() ? "" : " · PCIe ", pcie.c_str());
 }
 
+// Valeurs réellement mesurées sur des cartes du même modèle, jamais estimées. À compléter avec de vraies mesures.
+struct CardRef { const char* fpga; const char* pcie; double mbps, lat; int cards; };
+static const CardRef CARD_REFS[] = {
+    { "Enigma X1 (id", "gen2 x1", 190, 200, 1 },
+};
+
+Tx CardReference(const std::string& fpga, double best, double lat, int usb, const std::string& pcie, int* lvl) {
+    *lvl = 2;
+    if (best <= 0 || fpga.empty()) return {};
+    for (auto& r : CARD_REFS) {
+        if (fpga.rfind(r.fpga, 0) != 0 || pcie != r.pcie || usb != 3) continue;
+        double pm = best / r.mbps * 100;
+        bool ok = pm >= 85 && (lat <= 0 || lat <= r.lat * 1.25);
+        *lvl = ok ? 0 : 1;
+        Tx l = lat > 0 ? TX(" et %s µs", " and %s µs", Num(lat, 0).c_str()) : Tx{};
+        return TX("Référence pour cette carte (USB 3, PCIe %s, %d carte%s mesurée%s) : %s Mo/s et %s µs. La vôtre : %s Mo/s%s, %s.",
+                  "Reference for this card (USB 3, PCIe %s, %d card%s measured%.0s): %s MB/s and %s µs. Yours: %s MB/s%s, %s.",
+                  r.pcie, r.cards, r.cards > 1 ? "s" : "", r.cards > 1 ? "s" : "", Num(r.mbps, 0).c_str(), Num(r.lat, 0).c_str(), Num(best, 1).c_str(),
+                  g_en ? l.en.c_str() : l.fr.c_str(), ok ? T("c'est normal", "this is normal") : T("c'est plus faible", "this is lower"));
+    }
+    return TX("Pas encore de référence mesurée pour cette carte dans ces conditions (USB et lien PCIe).", "No measured reference yet for this card in these conditions (USB and PCIe link).");
+}
+
 int StabVerdict(const BenchState& b) {
     double minutes = b.stabElapsed / 60.0;
     if (b.sDrops == 0 && b.sSuccess >= 99.9 && b.sDips <= std::max(2, (int)(minutes / 5))) return 0;

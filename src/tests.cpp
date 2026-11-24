@@ -70,6 +70,14 @@ int RunTests() {
     std::string evil = js;
     evil.replace(evil.rfind("https://github.com"), 18, "https://evil.xx.com");
     CHECK(ParseRelease(evil, ver, url, sha) && url.empty());
+    CHECK(ParseRelease(js, ver, url, sha, "a.zip") && sha == std::string(64, 'b'));
+    CHECK(ParseRelease(js, ver, url, sha, LAUNCHER_ASSET) && url.empty());
+    CHECK(JsonText("{\"notes_fr\": \"a\\nb \\\"c\\\"\", \"x\": 1}", "notes_fr") == "a\nb \"c\"");
+    CHECK(JsonText("{}", "notes_fr").empty());
+    std::wstring sx = DataDir() + L"\\swap.exe";
+    std::string sd;
+    CHECK(SwapExe(sx, "un") == 0 && SwapExe(sx, "deux") == 0 && ReadFileAll(sx, sd) && sd == "deux" && !FileExists(sx + L".old") && !FileExists(sx + L".new"));
+    DeleteFileW(sx.c_str());
     CHECK(Sha256("abc") == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
 
     // Signalement : anonymisation, vidages retirés, zip
@@ -85,6 +93,12 @@ int RunTests() {
     CHECK(ParsePcieLink("rien") == "");
     CHECK(Bottleneck(35, 2, "gen2 x1").fr.find("USB 2") != std::string::npos);
     CHECK(Bottleneck(190, 3, "gen2 x1").fr != Bottleneck(60, 3, "gen2 x1").fr);
+
+    int lv = -1;
+    CHECK(!CardReference("Enigma X1 (id 13)", 190, 200, 3, "gen2 x1", &lv).fr.empty() && lv == 0);
+    CHECK(!CardReference("Enigma X1 (id 13)", 90, 200, 3, "gen2 x1", &lv).fr.empty() && lv == 1);
+    CHECK(!CardReference("Enigma X1 (FutureUse) (id 14)", 190, 200, 3, "gen2 x1", &lv).fr.empty() && lv == 2);
+    CHECK(CardReference("Enigma X1 (id 13)", 0, 0, 3, "gen2 x1", &lv).fr.empty());
 
     // Dérive de débit
     std::vector<StabSample> st;
